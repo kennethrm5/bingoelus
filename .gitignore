@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+twitch.config.json

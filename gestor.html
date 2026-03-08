@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />
+  <title>Bingoelus — Gestor</title>
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f172a;
+      --surface:   #1e293b;
+      --surface2:  #273549;
+      --accent:    #6366f1;
+      --accent-h:  #818cf8;
+      --success:   #22c55e;
+      --danger:    #ef4444;
+      --warn:      #f59e0b;
+      --text:      #e2e8f0;
+      --muted:     #94a3b8;
+      --radius:    10px;
+      --shadow:    0 4px 24px rgba(0,0,0,.45);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #334155;
+      box-shadow: var(--shadow);
+    }
+    header h1 { font-size: 1.4rem; color: var(--accent-h); letter-spacing: .05em; }
+    #url-publica {
+      background: var(--surface2);
+      border: 1px solid #4f46e5;
+      border-radius: var(--radius);
+      padding: 6px 14px;
+      font-size: .85rem;
+      color: var(--warn);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #url-publica span { font-weight: 700; }
+
+    /* Badge Twitch verificado */
+    .twitch-verified { color: #9147ff; font-size: .7rem; font-weight: 800; }
+
+    #btn-copiar {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      padding: 4px 10px;
+      font-size: .8rem;
+      transition: background .2s;
+    }
+    #btn-copiar:hover { background: var(--accent-h); }
+
+    /* ── Layout principal ──────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      grid-template-rows: auto 1fr 1fr;
+      gap: 16px;
+      padding: 16px;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ── Panel izquierdo (configuración) ────────── */
+    #panel-izq {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      grid-row: 1 / 3;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    /* Música: fila 1, columna 2 */
+    #card-musica { grid-column: 2; grid-row: 1; }
+
+    /* Cartones: fila 2, columna 2 */
+    #panel-cartones { grid-column: 2; grid-row: 2; min-height: 0; }
+
+    /* Log: fila 3, columna 1 (debajo de config) */
+    #panel-log { grid-column: 1; grid-row: 3; min-height: 0; }
+
+    /* Frases: fila 3, columna 2 */
+    #card-frases { grid-column: 2; grid-row: 3; display: flex; flex-direction: column; overflow: hidden; }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+    .card h2 {
+      font-size: .95rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 130px;
+      background: var(--bg);
+      border: 1px solid #334155;
+      border-radius: 7px;
+      color: var(--text);
+      font-size: .85rem;
+      padding: 10px;
+      resize: vertical;
+      outline: none;
+      transition: border-color .2s;
+    }
+    textarea:focus { border-color: var(--accent); }
+
+    button.primary {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 7px;
+      background: var(--accent);
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, transform .1s;
+      margin-top: 8px;
+    }
+    button.primary:hover  { background: var(--accent-h); }
+    button.primary:active { transform: scale(.97); }
+    button.danger  { background: var(--danger); }
+    button.danger:hover  { background: #f87171; }
+
+    /* Lista de frases cantables */
+    #lista-frases {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 6px;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+      align-content: flex-start;
+    }
+    .btn-frase {
+      padding: 8px 12px;
+      border: 1px solid #334155;
+      border-radius: 7px;
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-size: .82rem;
+      transition: all .18s;
+      word-break: break-word;
+    }
+    .btn-frase:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+    .btn-frase:disabled {
+      background: #1a3a1a;
+      border-color: var(--success);
+      color: var(--success);
+      cursor: default;
+      opacity: .85;
+    }
+
+    /* ── Panel derecho arriba (jugadores) ──────────────────── */
+    #panel-cartones {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      min-height: 0;
+      overflow-y: auto;
+      box-shadow: var(--shadow);
+    }
+    #ganadores-header { font-size: .78rem; font-weight: 400; }
+    #ganadores-header .ganador-linea { color: var(--warn); margin-left: 6px; }
+    #ganadores-header .ganador-bingo { color: var(--success); margin-left: 6px; }
+    .badge-offline {
+      font-size: .68rem; font-weight: 700; padding: 2px 7px;
+      border-radius: 4px; border: 1px solid #475569;
+      background: transparent; color: #64748b;
+      margin-left: 4px;
+    }
+    .jugador-offline .jugador-cabecera { opacity: .55; }
+    .jugador-offline .jugador-carton   { opacity: .75; }
+
+    #panel-cartones h2 {
+      font-size: .95rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    /* Lista acordeón */
+    #lista-jugadores {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .jugador-fila {
+      background: var(--surface2);
+      border: 1px solid #334155;
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+    .jugador-fila.abierto { border-color: var(--accent); }
+    .jugador-cabecera {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 16px;
+      cursor: pointer;
+      user-select: none;
+      transition: background .15s;
+    }
+    .jugador-cabecera:hover { background: rgba(99,102,241,.12); }
+    .jugador-nombre {
+      font-size: .92rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .jugador-chevron {
+      color: var(--muted);
+      font-size: .8rem;
+      transition: transform .25s;
+    }
+    .jugador-fila.abierto .jugador-chevron { transform: rotate(180deg); }
+    /* Panel del cartón (colapsable) */
+    .jugador-carton {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .3s ease;
+    }
+    .jugador-fila.abierto .jugador-carton { max-height: 600px; }
+    .jugador-carton-inner {
+      padding: 0 12px 12px;
+    }
+    /* Grid 5x5 */
+    .carton-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 3px;
+    }
+    .celda {
+      background: var(--bg);
+      border-radius: 4px;
+      padding: 4px 2px;
+      font-size: .6rem;
+      text-align: center;
+      line-height: 1.2;
+      min-height: 34px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      word-break: break-word;
+      color: var(--muted);
+      transition: background .2s, color .2s;
+      gap: 2px;
+    }
+    .celda.cantada {
+      background: #14532d;
+      color: #86efac;
+      font-weight: 600;
+    }
+    /* Celda que el jugador ha marcado manualmente */
+    .celda.marcada-jugador {
+      background: #1e3a5f;
+      color: #93c5fd;
+      font-weight: 600;
+      outline: 1px solid #3b82f6;
+    }
+    /* Celda cantada Y marcada por el jugador */
+    .celda.cantada.marcada-jugador {
+      background: linear-gradient(135deg, #14532d, #1e3a5f);
+      color: #4ade80;
+      outline: 2px solid #22c55e;
+    }
+
+    /* Etiqueta de Twitch */
+    .twitch-tag {
+      color: #9147ff;
+      font-size: .72rem;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    /* Botón de habilitar reclamaciones */
+    #btn-reclamaciones {
+      width: 100%;
+      margin-top: 8px;
+      padding: 9px;
+      border: none;
+      border-radius: 7px;
+      font-size: .88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    #btn-reclamaciones.off {
+      background: #334155;
+      color: var(--muted);
+    }
+    #btn-reclamaciones.on {
+      background: var(--success);
+      color: #000;
+    }
+
+    /* Badges de estado del jugador */
+    .badge {
+      display: inline-block;
+      font-size: .65rem;
+      padding: 2px 7px;
+      border-radius: 20px;
+      font-weight: 700;
+      margin-left: 2px;
+    }
+    .badge-linea { background: var(--warn);    color: #000; }
+    .badge-bingo { background: var(--success); color: #000; }
+
+    /* ── Log de eventos (lateral izquierdo, fila 3) ─────────── */
+    #panel-log {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #panel-log h2 {
+      font-size: .95rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    #log-eventos {
+      flex: 1;
+      overflow-y: auto;
+      font-size: .8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .log-item { padding: 4px 8px; border-radius: 5px; background: var(--bg); }
+    .log-item.ok     { color: var(--success); }
+    .log-item.warn   { color: var(--warn); }
+    .log-item.error  { color: var(--danger); }
+    .log-item.info   { color: var(--muted); }
+
+    /* ── Alerta de premio ─────────────────────────────────── */
+    #overlay-premio {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.82);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 20px;
+    }
+    #overlay-premio.visible { display: flex; }
+    #overlay-premio h2 {
+      font-size: 3.5rem;
+      font-weight: 900;
+      text-align: center;
+      animation: pulso 1s ease-in-out infinite alternate;
+    }
+    #overlay-premio p  { font-size: 1.6rem; color: var(--text); }
+    #overlay-premio button {
+      padding: 12px 32px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    @keyframes pulso {
+      from { text-shadow: 0 0 20px currentColor; }
+      to   { text-shadow: 0 0 60px currentColor, 0 0 120px currentColor; }
+    }
+
+    /* ── Scrollbars personalizados ────────────────────────── */
+    ::-webkit-scrollbar       { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* ── Tarjeta de música (inline: título + controles en la misma fila) ─ */
+    #card-musica {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 16px;
+    }
+    #card-musica h2 { margin: 0; white-space: nowrap; flex-shrink: 0; }
+    #card-musica .controles-musica {
+      display: flex;
+      gap: 6px;
+      flex-wrap: nowrap;
+      align-items: center;
+      margin-top: 0;
+    }
+    #card-musica button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: .82rem;
+      border: 1px solid #334155;
+      transition: background .15s;
+    }
+    #card-musica button:hover { background: var(--accent); border-color: var(--accent); }
+    #lbl-vol { color: var(--muted); font-size: .82rem; min-width: 40px; text-align: center; }
+    #btn-claxon {
+      width: 100%;
+      margin-top: 8px;
+      padding: 9px;
+      border: none;
+      border-radius: 7px;
+      background: #92400e;
+      color: #fde68a;
+      font-size: .88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    #btn-claxon:hover { background: #b45309; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header>
+  <h1>🎱 Bingoelus — Panel del Gestor</h1>
+  <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+    <div id="url-publica">
+      <div class="info-bloque">
+        <span class="etiq">🌐 URL jugadores:</span>
+        <span class="valor" id="txt-url">Generando túnel...</span>
+        <button class="btn-mini" id="btn-copiar">Copiar</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<main>
+  <!-- ── Panel izquierdo (configuración) ── -->
+  <aside id="panel-izq">
+
+    <!-- Configurar partida -->
+    <div class="card" id="card-config">
+      <h2>⚙️ Configurar Partida</h2>
+      <textarea
+        id="input-frases"
+        placeholder="Escribe las frases separadas por comas o saltos de línea.&#10;Mínimo 25 frases para un cartón 5×5.&#10;&#10;Ejemplo:&#10;Le llegó el cuento,&#10;Tenía el pelo negro,&#10;..."
+      ></textarea>
+      <button class="primary" id="btn-iniciar">▶ Iniciar Partida</button>
+      <button class="primary danger" id="btn-resetear" style="margin-top:6px">🔄 Resetear Todo</button>
+      <button id="btn-reclamaciones" class="off">🔒 Habilitar Reclamaciones (desactivado)</button>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <label for="input-umbral" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">Casillas restantes máx. para ¡Bingo!:</label>
+        <input type="number" id="input-umbral" min="0" max="25" value="0"
+          style="width:58px;background:var(--bg);border:1px solid #334155;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
+        <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#fff;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
+      </div>
+      <button id="btn-claxon">📯 Tocar Claxon</button>
+    </div>
+
+  </aside>
+
+  <!-- ── Música de fondo (encima de los cartones) ── -->
+  <div class="card" id="card-musica">
+    <h2>🎵 Música de Fondo</h2>
+    <div id="yt-player"></div>
+    <div class="controles-musica">
+      <button id="btn-musica-play">▶ Reanudar</button>
+      <button id="btn-musica-pause">⏸ Pausar</button>
+      <button id="btn-vol-down">🔉</button>
+      <span id="lbl-vol">50%</span>
+      <button id="btn-vol-up">🔊</button>
+    </div>
+  </div>
+
+  <!-- ── Jugadores (acordeón) ── -->
+  <section id="panel-cartones">
+    <h2>👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
+    <div id="lista-jugadores">
+      <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
+    </div>
+  </section>
+
+  <!-- ── Log de eventos ── -->
+  <section id="panel-log">
+    <h2>📋 Registro de Eventos</h2>
+    <div id="log-eventos"></div>
+  </section>
+
+  <!-- ── Lista de frases cantables (ancho completo, debajo) ── -->
+  <div class="card" id="card-frases">
+    <h2>📣 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
+    <div id="lista-frases">
+      <p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════════════ OVERLAY PREMIO ═══════════════ -->
+<div id="overlay-premio">
+  <h2 id="overlay-tipo" style="color: var(--warn)">🎉 ¡LÍNEA!</h2>
+  <p id="overlay-ganador">Ha ganado: <strong></strong></p>
+  <div id="overlay-btns-linea" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+    <button onclick="continuarBingo()" style="background:var(--success);color:#000;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🏆 Continuar para el Bingo</button>
+    <button onclick="cerrarOverlay()" style="background:var(--danger);color:#fff;padding:10px 24px;font-size:.9rem;border:none;border-radius:8px;cursor:pointer">Terminar aquí</button>
+  </div>
+  <div id="overlay-btns-bingo" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+    <button onclick="terminarPartida()" style="background:var(--danger);color:#fff;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🔚 Terminar partida aquí</button>
+    <button onclick="continuarBingo()" style="background:var(--accent);color:#fff;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🏆 Permitir más ganadores de Bingo</button>
+  </div>
+</div>
+
+<!-- YouTube IFrame API -->
+<script src="https://www.youtube.com/iframe_api"></script>
+<!-- Socket.io (servido automáticamente por el servidor) -->
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  // ══════════════════════════════════════════════════════
+  // gestor.js — Lógica de la interfaz del gestor
+  // Conecta al namespace /gestor del servidor Socket.io
+  // ══════════════════════════════════════════════════════
+
+  'use strict';
+
+  // ── Conexión al namespace del gestor ──────────────────
+  const socket = io('/gestor', { transports: ['websocket', 'polling'] });
+
+  // ── Estado local (mirror del servidor para renderizar) ─
+  let estadoLocal = {
+    frases:                   [],
+    cantadas:                 [],
+    jugadores:                [],
+    partidaActiva:            false,
+    reclamacionesHabilitadas: false,
+    umbralReclamo:            0,
+  };
+
+  let reclamacionesActivas = false;
+
+  // ── Elementos DOM ─────────────────────────────────────
+  const txtUrl          = document.getElementById('txt-url');
+  const btnCopiar       = document.getElementById('btn-copiar');
+  const inputFrases     = document.getElementById('input-frases');
+  const btnIniciar      = document.getElementById('btn-iniciar');
+  const btnResetear     = document.getElementById('btn-resetear');
+  const listaFrases     = document.getElementById('lista-frases');
+  const contCantadas    = document.getElementById('contador-cantadas');
+  const contTotal       = document.getElementById('contador-total');
+  const numJugadores    = document.getElementById('num-jugadores');
+  const listaJugadores  = document.getElementById('lista-jugadores');
+  const logEventos      = document.getElementById('log-eventos');
+  const overlayPremio   = document.getElementById('overlay-premio');
+  const overlayTipo     = document.getElementById('overlay-tipo');
+  const overlayGanador  = document.getElementById('overlay-ganador');
+
+  // Rastrea qué socketId tiene el acordeón abierto
+  let jugadorAbierto = null;
+
+  // ── YouTube IFrame Player ──────────────────────────────────
+  let ytPlayer = null;
+  let ytVolumen = 50;
+
+  // Llamado automáticamente por el API de YouTube cuando carga
+  window.onYouTubeIframeAPIReady = function () {
+    ytPlayer = new YT.Player('yt-player', {
+      width: '1',
+      height: '1',
+      videoId: 'PaFHwTjy1yE',
+      playerVars: {
+        autoplay: 1,
+        mute: 1,          // empieza muteado para saltarse la política de autoplay
+        controls: 0,
+        loop: 0,
+        rel: 0,
+      },
+      events: {
+        onReady: function (e) {
+          e.target.setVolume(ytVolumen);
+          e.target.unMute();
+          document.getElementById('lbl-vol').textContent = ytVolumen + '%';
+        },
+      },
+    });
+  };
+
+  function ytSetVol(v) {
+    ytVolumen = Math.max(0, Math.min(100, v));
+    document.getElementById('lbl-vol').textContent = ytVolumen + '%';
+    if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(ytVolumen);
+  }
+
+  document.getElementById('btn-musica-play').addEventListener('click', () => {
+    if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
+  });
+  document.getElementById('btn-musica-pause').addEventListener('click', () => {
+    if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+  });
+  document.getElementById('btn-vol-up').addEventListener('click', () => ytSetVol(ytVolumen + 10));
+  document.getElementById('btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
+
+  // ── Claxon mp3 ─────────────────────────────────────────────
+  const audioClaxon = new Audio('/media/claxon.mp3');
+
+  function reproducirClaxon() {
+    audioClaxon.currentTime = 0;
+    audioClaxon.play().catch(e => console.warn('Claxon no disponible:', e.message));
+  }
+
+  document.getElementById('btn-claxon').addEventListener('click', () => reproducirClaxon());
+
+  // ── Helpers de UI ─────────────────────────────────────
+
+  function agregarLog(msg, tipo = 'info') {
+    const item = document.createElement('div');
+    item.className = `log-item ${tipo}`;
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    item.textContent = `[${hora}] ${msg}`;
+    logEventos.prepend(item); // Más reciente arriba
+    // Limitar a 60 entradas
+    while (logEventos.children.length > 60) {
+      logEventos.removeChild(logEventos.lastChild);
+    }
+  }
+
+  function mostrarOverlay(tipo, ganador, twitch) {
+    const etiqueta = twitch ? `${ganador} <small style="opacity:.7">@${twitch}</small>` : ganador;
+    if (tipo === 'bingo') {
+      overlayTipo.textContent    = '🏆 ¡BINGO!';
+      overlayTipo.style.color    = 'var(--success)';
+      document.getElementById('overlay-btns-linea').style.display = 'none';
+      document.getElementById('overlay-btns-bingo').style.display = 'block';
+    } else {
+      overlayTipo.textContent    = '🎉 ¡LÍNEA!';
+      overlayTipo.style.color    = 'var(--warn)';
+      document.getElementById('overlay-btns-linea').style.display = 'flex';
+      document.getElementById('overlay-btns-bingo').style.display = 'none';
+    }
+    overlayGanador.innerHTML = `Ha ganado: <strong>${etiqueta}</strong>`;
+    overlayPremio.classList.add('visible');
+  }
+
+  function cerrarOverlay() {
+    overlayPremio.classList.remove('visible');
+  }
+  window.cerrarOverlay = cerrarOverlay;
+
+  function continuarBingo() {
+    cerrarOverlay();
+    socket.emit('gestor:continuar-bingo');
+    agregarLog('El gestor permite más ganadores de Bingo.', 'ok');
+  }
+  window.continuarBingo = continuarBingo;
+
+  function terminarPartida() {
+    cerrarOverlay();
+    socket.emit('gestor:terminar-partida');
+    agregarLog('El gestor ha terminado la partida.', 'ok');
+  }
+  window.terminarPartida = terminarPartida;
+
+  // Actualiza el botón de reclamaciones según el estado del servidor
+  function actualizarBotonReclamaciones(activas) {
+    reclamacionesActivas = activas;
+    const btn = document.getElementById('btn-reclamaciones');
+    if (activas) {
+      btn.textContent = '🔓 Deshabilitar Reclamaciones (activo)';
+      btn.className   = 'on';
+    } else {
+      btn.textContent = '🔒 Habilitar Reclamaciones (desactivado)';
+      btn.className   = 'off';
+    }
+  }
+
+  // ── Renderizar lista de frases (panel izquierdo) ───────
+  function renderizarFrases(frases, cantadas) {
+    listaFrases.innerHTML = '';
+    const cantadasSet = new Set(cantadas);
+    contCantadas.textContent = cantadas.length;
+    contTotal.textContent    = frases.length;
+
+    if (frases.length === 0) {
+      listaFrases.innerHTML = '<p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>';
+      return;
+    }
+
+    frases.forEach(frase => {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
+      const btn = document.createElement('button');
+      btn.className   = 'btn-frase';
+      btn.textContent = frase;
+      btn.disabled    = cantadasSet.has(frase);
+      btn.style.flex  = '1';
+
+      if (!btn.disabled) {
+        btn.addEventListener('click', () => {
+          socket.emit('gestor:cantar-frase', { frase });
+        });
+      }
+
+      wrapper.appendChild(btn);
+
+      if (cantadasSet.has(frase)) {
+        const btnD = document.createElement('button');
+        btnD.textContent = '↩';
+        btnD.title = `Desmarcar: ${frase}`;
+        btnD.style.cssText = 'padding:6px 9px;border:1px solid var(--danger);border-radius:7px;background:transparent;color:var(--danger);cursor:pointer;font-size:.8rem;flex-shrink:0;line-height:1;transition:background .15s;';
+        btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(239,68,68,.15)'; });
+        btnD.addEventListener('mouseout',  () => { btnD.style.background = 'transparent'; });
+        btnD.addEventListener('click', () => {
+          socket.emit('gestor:desmarcar-frase', { frase });
+        });
+        wrapper.appendChild(btnD);
+      }
+
+      listaFrases.appendChild(wrapper);
+    });
+  }
+
+  // ── Renderizar lista de jugadores (acordeón) ──────────
+  function renderizarCartones(jugadores, cantadas) {
+    const cantadasSet  = new Set(cantadas);
+    const onlineCount  = jugadores.filter(j => j.online !== false).length;
+    const totalCount   = jugadores.length;
+    numJugadores.textContent = totalCount > onlineCount
+      ? `${onlineCount} / ${totalCount}`
+      : onlineCount;
+
+    if (jugadores.length === 0) {
+      listaJugadores.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>';
+      jugadorAbierto = null;
+      return;
+    }
+
+    // Guardar el ID abierto antes de reconstruir
+    const anteriorAbierto = jugadorAbierto;
+    listaJugadores.innerHTML = '';
+
+    jugadores.forEach(j => {
+      const fila = document.createElement('div');
+      fila.className  = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '');
+      fila.dataset.id = j.socketId;
+      if (j.socketId === anteriorAbierto) fila.classList.add('abierto');
+
+      // ── Cabecera clicable ──────────────────────────────
+      const cabecera = document.createElement('div');
+      cabecera.className = 'jugador-cabecera';
+
+      const nombreEl = document.createElement('div');
+      nombreEl.className = 'jugador-nombre';
+
+      // Avatar inicial
+      const avatar = document.createElement('span');
+      avatar.textContent = j.nombre.charAt(0).toUpperCase();
+      avatar.style.cssText = 'background:var(--accent);color:#fff;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0';
+      nombreEl.appendChild(avatar);
+
+      const textoNombre = document.createElement('span');
+      textoNombre.textContent = j.nombre;
+      nombreEl.appendChild(textoNombre);
+
+      // Twitch username (optional)
+      if (j.twitch) {
+        const twitchEl = document.createElement('span');
+        twitchEl.className   = 'twitch-tag';
+        twitchEl.textContent = `@${j.twitch}`;
+        if (j.twitchVerified) {
+          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
+          twitchEl.textContent += ' ✓';
+          twitchEl.classList.add('twitch-verified');
+        }
+        nombreEl.appendChild(twitchEl);
+      }
+
+      if (j.cantadoLinea) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-linea';
+        b.textContent = 'LÍNEA';
+        nombreEl.appendChild(b);
+      }
+      if (j.cantadoBingo) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-bingo';
+        b.textContent = 'BINGO';
+        nombreEl.appendChild(b);
+      }
+      if (j.online === false) {
+        const b = document.createElement('span');
+        b.className = 'badge-offline';
+        b.textContent = 'desconectado';
+        nombreEl.appendChild(b);
+      }
+
+      const chevron = document.createElement('span');
+      chevron.className   = 'jugador-chevron';
+      chevron.textContent = '▼';
+
+      cabecera.appendChild(nombreEl);
+      cabecera.appendChild(chevron);
+
+      // Toggle acordeón al hacer clic en la cabecera
+      cabecera.addEventListener('click', () => {
+        const estaAbierto = fila.classList.contains('abierto');
+        // Cerrar todos
+        listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
+        if (estaAbierto) {
+          jugadorAbierto = null; // Era el mismo → cerrar
+        } else {
+          fila.classList.add('abierto');
+          jugadorAbierto = j.socketId;
+        }
+      });
+
+      // ── Panel del cartón (collapsable) ────────────────
+      const panelCarton = document.createElement('div');
+      panelCarton.className = 'jugador-carton';
+
+      const inner = document.createElement('div');
+      inner.className = 'jugador-carton-inner';
+
+      const grid = document.createElement('div');
+      grid.className = 'carton-grid';
+      const marcadasSet = new Set(j.marcadas || []);
+      j.carton.forEach(fila2 => {
+        fila2.forEach(frase => {
+          const celda = document.createElement('div');
+          const esCantada  = cantadasSet.has(frase);
+          const esMarcada  = marcadasSet.has(frase);
+          let clasesCelda  = 'celda';
+          if (esCantada)  clasesCelda += ' cantada';
+          if (esMarcada)  clasesCelda += ' marcada-jugador';
+          celda.className   = clasesCelda;
+          const span = document.createElement('span');
+          span.textContent = frase;
+          celda.appendChild(span);
+          celda.title       = esMarcada ? `✓ Marcada: ${frase}` : frase;
+          grid.appendChild(celda);
+        });
+      });
+
+      inner.appendChild(grid);
+      panelCarton.appendChild(inner);
+
+      fila.appendChild(cabecera);
+      fila.appendChild(panelCarton);
+      listaJugadores.appendChild(fila);
+    });
+  }
+
+  // ── Actualizar toda la UI con un estado completo ───────
+  function actualizarGanadoresHeader() {
+    const ganLinea = estadoLocal.jugadores.filter(j => j.cantadoLinea).map(j =>
+      j.twitch ? `${j.nombre} <span style="opacity:.6;font-size:.9em">@${j.twitch}</span>` : j.nombre
+    );
+    const ganBingo = estadoLocal.jugadores.filter(j => j.cantadoBingo).map(j =>
+      j.twitch ? `${j.nombre} <span style="opacity:.6;font-size:.9em">@${j.twitch}</span>` : j.nombre
+    );
+    const el = document.getElementById('ganadores-header');
+    if (!el) return;
+    const partes = [];
+    if (ganLinea.length) partes.push(`<span class="ganador-linea">🎉 ${ganLinea.join(', ')}</span>`);
+    if (ganBingo.length) partes.push(`<span class="ganador-bingo">🏆 ${ganBingo.join(', ')}</span>`);
+    el.innerHTML = partes.length ? ' — ' + partes.join('  ') : '';
+  }
+
+  function aplicarEstado(nuevoEstado) {
+    estadoLocal = { ...estadoLocal, ...nuevoEstado };
+    renderizarFrases(estadoLocal.frases, estadoLocal.cantadas);
+    renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    actualizarGanadoresHeader();
+    if (typeof nuevoEstado.reclamacionesHabilitadas === 'boolean') {
+      actualizarBotonReclamaciones(nuevoEstado.reclamacionesHabilitadas);
+    }
+    if (typeof nuevoEstado.umbralReclamo === 'number') {
+      const input = document.getElementById('input-umbral');
+      if (input) input.value = nuevoEstado.umbralReclamo;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // EVENTOS SOCKET.IO
+  // ═══════════════════════════════════════════════════════
+
+  socket.on('connect', () => {
+    agregarLog('Conectado al servidor.', 'ok');
+  });
+  socket.on('disconnect', () => {
+    agregarLog('Desconectado del servidor.', 'error');
+  });
+
+  // Estado completo (al conectar o tras reset)
+  socket.on('estado:actual', (data) => {
+    aplicarEstado(data);
+    agregarLog('Estado del servidor sincronizado.', 'info');
+  });
+
+  // URL del túnel (Cloudflare — sin contraseña)
+  socket.on('tunel:url', ({ url }) => {
+    document.getElementById('txt-url').textContent = url || 'N/A';
+    agregarLog(`URL lista: ${url}`, 'ok');
+  });
+
+  // Frase descantada por el gestor
+  socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
+    estadoLocal.cantadas = cantadas;
+    renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarCartones(estadoLocal.jugadores, cantadas);
+    agregarLog(`Descantada: "${frase}"`, 'warn');
+  });
+
+  // Umbral de reclamación actualizado
+  socket.on('partida:umbral-actualizado', ({ umbral }) => {
+    estadoLocal.umbralReclamo = umbral;
+    const input = document.getElementById('input-umbral');
+    if (input) input.value = umbral;
+    agregarLog(`Umbral de reclamación: ${umbral} casilla(s).`, 'info');
+  });
+
+  // Frase cantada por el gestor
+  socket.on('partida:frase-cantada', ({ frase, cantadas }) => {
+    estadoLocal.cantadas = cantadas;
+    renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarCartones(estadoLocal.jugadores, cantadas);
+    agregarLog(`Cantada: "${frase}"`, 'warn');
+  });
+
+  // Nuevo jugador o jugador desconectado
+  socket.on('partida:jugador-unido', ({ jugadores }) => {
+    estadoLocal.jugadores = jugadores;
+    renderizarCartones(jugadores, estadoLocal.cantadas);
+    const n = jugadores.length;
+    agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+  });
+
+  // Línea válida
+  socket.on('partida:linea-valida', ({ ganador, twitch }) => {
+    agregarLog(`🎉 ¡LÍNEA! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}`, 'ok');
+    reproducirClaxon(false);
+    mostrarOverlay('linea', ganador, twitch);
+    const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
+    if (jug) {
+      jug.cantadoLinea = true;
+      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    }
+    actualizarGanadoresHeader();
+  });
+
+  // Bingo válido
+  socket.on('partida:bingo-valido', ({ ganador, twitch }) => {
+    agregarLog(`🏆 ¡BINGO! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}. El gestor decide si continuar.`, 'ok');
+    reproducirClaxon(true);
+    mostrarOverlay('bingo', ganador, twitch);
+    const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
+    if (jug) {
+      jug.cantadoBingo = true;
+      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    }
+    actualizarGanadoresHeader();
+    // No terminamos: el gestor elige desde el overlay
+  });
+
+  // Partida terminada definitivamente por el gestor
+  socket.on('partida:juego-terminado', ({ ganadores }) => {
+    estadoLocal.partidaActiva = false;
+    const lista = ganadores.length > 0 ? ganadores.join(', ') : 'ninguno';
+    agregarLog(`🏆 Partida finalizada. Ganadores de Bingo: ${lista}`, 'ok');
+  });
+
+  // Actualización del estado de reclamaciones
+  socket.on('partida:reclamaciones-actualizadas', ({ habilitadas }) => {
+    actualizarBotonReclamaciones(habilitadas);
+    agregarLog(habilitadas ? '🔓 Reclamaciones habilitadas.' : '🔒 Reclamaciones deshabilitadas.', habilitadas ? 'ok' : 'warn');
+  });
+
+  // Error del servidor
+  socket.on('gestor:error', ({ msg }) => {
+    agregarLog(`Error: ${msg}`, 'error');
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // ACCIONES DEL GESTOR
+  // ═══════════════════════════════════════════════════════
+
+  btnIniciar.addEventListener('click', () => {
+    const raw = inputFrases.value;
+    // Separar por comas O saltos de línea, limpiar espacios
+    const frases = raw
+      .split(/[\n,]+/)
+      .map(f => f.trim())
+      .filter(f => f.length > 0);
+
+    if (frases.length < 25) {
+      alert(`Necesitas al menos 25 frases. Tienes ${frases.length}.`);
+      return;
+    }
+
+    socket.emit('gestor:iniciar-partida', { frases });
+    agregarLog(`Partida iniciada con ${frases.length} frases.`, 'ok');
+  });
+
+  btnResetear.addEventListener('click', () => {
+    if (confirm('¿Seguro que quieres resetear la partida? Se borrarán todos los datos.')) {
+      socket.emit('gestor:resetear');
+      inputFrases.value = '';
+      agregarLog('Partida reseteada.', 'warn');
+    }
+  });
+
+  document.getElementById('btn-reclamaciones').addEventListener('click', () => {
+    if (reclamacionesActivas) {
+      socket.emit('gestor:deshabilitar-reclamaciones');
+    } else {
+      socket.emit('gestor:habilitar-reclamaciones');
+    }
+  });
+
+  document.getElementById('btn-umbral').addEventListener('click', () => {
+    const umbral = Math.max(0, Math.min(25, parseInt(document.getElementById('input-umbral').value, 10) || 0));
+    socket.emit('gestor:set-umbral', { umbral });
+    agregarLog(`Umbral aplicado: ${umbral} casilla(s) mínima(s) para reclamar.`, 'info');
+  });
+
+  btnCopiar.addEventListener('click', () => {
+    const url = document.getElementById('txt-url').textContent;
+    if (url && url !== 'Generando túnel...') {
+      navigator.clipboard.writeText(url).then(() => {
+        btnCopiar.textContent = '¡Copiado!';
+        setTimeout(() => { btnCopiar.textContent = 'Copiar'; }, 2000);
+      }).catch(() => alert('URL: ' + url));
+    }
+  });
+
+</script>
+</body>
+</html>
