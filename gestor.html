@@ -461,9 +461,56 @@
       transition: background .2s;
     }
     #btn-claxon:hover { background: #b45309; }
+
+    /* ── Overlay de conexión al servidor ──────────────── */
+    #overlay-conexion {
+      position: fixed; inset: 0; z-index: 1000;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .connect-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 36px 40px;
+      box-shadow: var(--shadow);
+      width: 400px;
+      max-width: 90vw;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .connect-card h2 { color: var(--accent-h); font-size: 1.4rem; text-align: center; margin-bottom: 4px; }
+    .connect-card p  { color: var(--muted); font-size: .88rem; text-align: center; }
+    .connect-card input {
+      width: 100%; background: var(--bg);
+      border: 1px solid #334155; border-radius: 7px;
+      color: var(--text); font-size: .9rem;
+      padding: 10px 12px; outline: none; transition: border-color .2s;
+    }
+    .connect-card input:focus { border-color: var(--accent); }
+    .connect-card button {
+      padding: 11px; border: none; border-radius: 7px;
+      background: var(--accent); color: #fff;
+      font-size: .95rem; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .connect-card button:hover { background: var(--accent-h); }
   </style>
 </head>
 <body>
+
+<!-- ═══════════════ OVERLAY CONEXIÓN ═══════════════ -->
+<div id="overlay-conexion">
+  <div class="connect-card">
+    <h2>🎱 Bingoelus — Gestor</h2>
+    <p>Introduce la URL del servidor y el token para conectar.</p>
+    <input id="input-srv-url" type="url" placeholder="https://xxx.trycloudflare.com" autocomplete="off" />
+    <input id="input-gestor-token" type="password" placeholder="Token del gestor" autocomplete="off"
+      onkeydown="if(event.key==='Enter')conectar()" />
+    <button onclick="conectar()">Conectar</button>
+    <p id="connect-error" style="color:var(--danger);min-height:1.2em;"></p>
+  </div>
+</div>
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header>
@@ -472,7 +519,7 @@
     <div id="url-publica">
       <div class="info-bloque">
         <span class="etiq">🌐 URL jugadores:</span>
-        <span class="valor" id="txt-url">Generando túnel...</span>
+        <span class="valor" id="txt-url">—</span>
         <button class="btn-mini" id="btn-copiar">Copiar</button>
       </div>
     </div>
@@ -558,8 +605,8 @@
 
 <!-- YouTube IFrame API -->
 <script src="https://www.youtube.com/iframe_api"></script>
-<!-- Socket.io (servido automáticamente por el servidor) -->
-<script src="/socket.io/socket.io.js"></script>
+<!-- Socket.io desde CDN (v4.7.x, compatible con el servidor) -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
   // ══════════════════════════════════════════════════════
   // gestor.js — Lógica de la interfaz del gestor
@@ -568,8 +615,29 @@
 
   'use strict';
 
-  // ── Conexión al namespace del gestor ──────────────────
-  const socket = io('/gestor', { transports: ['websocket', 'polling'] });
+  // ── Conexión diferida — el gestor introduce URL y token ──────
+  let socket = null;
+
+  // Pre-rellenar con la última URL usada
+  (function() {
+    const guardada = localStorage.getItem('bingoelus_srv_url') || '';
+    if (guardada) {
+      const el = document.getElementById('input-srv-url');
+      if (el) el.value = guardada;
+    }
+  })();
+
+  function conectar() {
+    const url   = (document.getElementById('input-srv-url').value   || '').trim().replace(/\/$/, '');
+    const token = (document.getElementById('input-gestor-token').value || '').trim();
+    const errEl = document.getElementById('connect-error');
+    if (!url || !token) { errEl.textContent = 'Completa los dos campos.'; return; }
+    errEl.textContent = 'Conectando…';
+    localStorage.setItem('bingoelus_srv_url', url);
+    socket = io(`${url}/gestor`, { transports: ['websocket', 'polling'], auth: { token } });
+    registrarEventos();
+  }
+  window.conectar = conectar;
 
   // ── Estado local (mirror del servidor para renderizar) ─
   let estadoLocal = {
@@ -928,26 +996,29 @@
   // EVENTOS SOCKET.IO
   // ═══════════════════════════════════════════════════════
 
-  socket.on('connect', () => {
-    agregarLog('Conectado al servidor.', 'ok');
-  });
-  socket.on('disconnect', () => {
-    agregarLog('Desconectado del servidor.', 'error');
-  });
+  function registrarEventos() {
+    socket.on('connect', () => {
+      document.getElementById('overlay-conexion').style.display = 'none';
+      const url = localStorage.getItem('bingoelus_srv_url') || '';
+      document.getElementById('txt-url').textContent = url;
+      agregarLog('Conectado al servidor.', 'ok');
+    });
+    socket.on('connect_error', (err) => {
+      const errEl = document.getElementById('connect-error');
+      if (errEl) errEl.textContent = 'Error: ' + (err.message || 'no se pudo conectar.');
+      if (socket) { socket.disconnect(); socket = null; }
+    });
+    socket.on('disconnect', () => {
+      agregarLog('Desconectado del servidor.', 'error');
+    });
 
-  // Estado completo (al conectar o tras reset)
-  socket.on('estado:actual', (data) => {
-    aplicarEstado(data);
-    agregarLog('Estado del servidor sincronizado.', 'info');
-  });
+    // Estado completo (al conectar o tras reset)
+    socket.on('estado:actual', (data) => {
+      aplicarEstado(data);
+      agregarLog('Estado del servidor sincronizado.', 'info');
+    });
 
-  // URL del túnel (Cloudflare — sin contraseña)
-  socket.on('tunel:url', ({ url }) => {
-    document.getElementById('txt-url').textContent = url || 'N/A';
-    agregarLog(`URL lista: ${url}`, 'ok');
-  });
-
-  // Frase descantada por el gestor
+    // Frase descantada por el gestor
   socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
     estadoLocal.cantadas = cantadas;
     renderizarFrases(estadoLocal.frases, cantadas);
@@ -1019,10 +1090,11 @@
     agregarLog(habilitadas ? '🔓 Reclamaciones habilitadas.' : '🔒 Reclamaciones deshabilitadas.', habilitadas ? 'ok' : 'warn');
   });
 
-  // Error del servidor
-  socket.on('gestor:error', ({ msg }) => {
-    agregarLog(`Error: ${msg}`, 'error');
-  });
+    // Error del servidor
+    socket.on('gestor:error', ({ msg }) => {
+      agregarLog(`Error: ${msg}`, 'error');
+    });
+  } // fin registrarEventos()
 
   // ═══════════════════════════════════════════════════════
   // ACCIONES DEL GESTOR
@@ -1069,7 +1141,7 @@
 
   btnCopiar.addEventListener('click', () => {
     const url = document.getElementById('txt-url').textContent;
-    if (url && url !== 'Generando túnel...') {
+    if (url && url !== '—') {
       navigator.clipboard.writeText(url).then(() => {
         btnCopiar.textContent = '¡Copiado!';
         setTimeout(() => { btnCopiar.textContent = 'Copiar'; }, 2000);
