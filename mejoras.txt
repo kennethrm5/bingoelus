@@ -1,8 +1,0 @@
-- cambiar diseño de las no cantadas a las cantadas
-- limitar clicks y poner delay de tiempo 
-- limitar por ip/caché ¿Conseguir MAC y limitarlo por eso? si no se puede por mac buscar la forma de que no se pueda con vpn cobseguir otro carton, siempre tengas el mismo para no hacer trampas
-- Enlazar con usuario de twitch
-- Nombres de usuario no duplicados
-- que el gestor vea las casillas que el usuario ha marcado
-- Se le debe preguntar al gestor si quiere seguir con el bingo para dar otro premio
-- boton de los usuarios de que ganó que solo se habilita cuando el gestor lo habilita

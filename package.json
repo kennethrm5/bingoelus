@@ -1,6 +1,6 @@
 {
   "name": "bingoelus",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Juego de bingo personalizado con frases - gestor Electron, jugadores por navegador",
   "author": "@kennethrm5",
   "main": "main.js",
@@ -9,9 +9,7 @@
     "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win"
   },
   "dependencies": {
-    "@ngrok/ngrok": "^1.7.0",
-    "express": "^4.18.3",
-    "socket.io": "^4.7.2"
+    "express": "^4.18.3"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -42,6 +40,7 @@
       "**/*",
       "!resultados/**",
       "!dist/**",
+      "!servidor/**",
       "!.gitignore",
       "!*.md"
     ]
