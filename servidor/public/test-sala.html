@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Sala de Espera | Bingoelus</title>
+  <style>
+    body { background: #18181b; color: #efeff1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; }
+    .spinner { width: 50px; height: 50px; border: 5px solid rgba(145, 70, 255, 0.2); border-top-color: #9146FF; border-radius: 50%; animation: spin 1s ease-in-out infinite; margin-bottom: 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { margin: 0 0 10px 0; font-size: 24px; }
+    /* Forzado a block para que se vea en el HTML de prueba */
+    #cola { color: #fbbf24; background: rgba(251, 191, 36, 0.1); padding: 15px 20px; border-radius: 8px; max-width: 400px; font-weight: 500; font-size: 15px; border: 1px solid rgba(251, 191, 36, 0.2); margin-top: 20px; display: block; }
+    .pos-resaltada { font-size: 1.2em; font-weight: bold; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h2 id="titulo">Conectando con Twitch...</h2>
+  
+  <div id="cola">
+    ⏳ Hay un pico de jugadores simultáneos.<br><br>
+    Estás en la posición <span id="pos" class="pos-resaltada">42</span> de la sala de espera.<br><br>
+    No cierres ni recargues la ventana, entrarás automáticamente.
+  </div>
+  
+  <script>
+    // Animación de demostración para que veas cómo funciona en real
+    let pos = 42;
+    setInterval(() => {
+      if (pos > 1) {
+        pos--;
+        document.getElementById('pos').innerText = pos;
+      } else {
+        document.getElementById('titulo').innerText = "¡Listo! Redirigiendo...";
+        document.getElementById('cola').style.display = 'none';
+      }
+    }, 800); // Rápido para que no tengas que esperar mucho en el test
+  </script>
+</body>
+</html>
