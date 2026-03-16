@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />  <title>Bingoelus 🎱</title>
+  <style>
+    /* ── Reset & Variables ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0b00;
+      --surface:  #181400;
+      --surface2: #221e00;
+      --accent:   #f5b800;
+      --accent-h: #ffd44d;
+      --success:  #22c55e;
+      --danger:   #ef4444;
+      --warn:     #fb923c;
+      --text:     #fdf6d8;
+      --muted:    #9a8040;
+      --radius:   12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid #3d3500;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.45);
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 1.4rem;
+      color: var(--accent-h);
+      letter-spacing: .06em;
+      margin: 0;
+      text-align: left;
+    }
+
+    #contenido {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 24px 16px;
+    }
+
+    .subtitulo {
+      color: var(--muted);
+      font-size: .9rem;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    /* ── Pantalla de Login ─────────────────────────────── */
+    #pantalla-login {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      max-width: 420px;
+    }
+    #pantalla-login button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #000;
+      font-size: 1.05rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s, transform .1s;
+    }
+    #pantalla-login button:hover  { background: var(--accent-h); }
+    #pantalla-login button:active { transform: scale(.97); }
+
+    /* Tarjeta Twitch (mostrada tras autenticarse) */
+    #twitch-card {
+      width: 100%;
+      padding: 16px 20px;
+      border-radius: var(--radius);
+      background: #1f0a3c;
+      border: 1px solid #9147ff66;
+      display: none;
+      align-items: center;
+      gap: 14px;
+    }
+    #twitch-avatar {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: #9147ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    #twitch-card-info { flex: 1; }
+    #twitch-card-name {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    #twitch-card-login {
+      font-size: .85rem;
+      color: #9147ff;
+      font-weight: 600;
+    }
+    #twitch-logout {
+      font-size: .78rem;
+      color: var(--muted);
+      text-decoration: underline;
+      white-space: nowrap;
+    }
+
+    /* Campo Discord */
+    #discord-step {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+    #discord-step label {
+      font-size: .88rem;
+      color: var(--muted);
+    }
+    #discord-step input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      border: 1px solid #3d3500;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    #discord-step input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    #discord-error {
+      font-size: .82rem;
+      color: var(--danger);
+      display: none;
+    }
+
+    /* Estado de carga / mensajes de error OAuth */
+    #twitch-loading {
+      color: var(--muted);
+      font-size: .9rem;
+      text-align: center;
+      padding: 10px;
+    }
+
+    #msg-espera {
+      color: var(--warn);
+      font-size: .9rem;
+      text-align: center;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid #facc1533;
+    }
+
+    /* ── Pantalla de Reglas ─────────────────────────────── */
+    #pantalla-reglas {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 520px;
+      gap: 20px;
+      animation: aparecer .3s ease;
+    }
+    #reglas-card {
+      background: var(--surface);
+      border: 1px solid #3d3500;
+      border-radius: var(--radius);
+      padding: 28px 28px 22px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    #reglas-card h2 {
+      text-align: center;
+      font-size: 1.25rem;
+      letter-spacing: .06em;
+      color: var(--accent);
+      margin: 0;
+    }
+    #reglas-card h2 span { color: var(--text); }
+    .regla {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .regla-num {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #000;
+      font-weight: 800;
+      font-size: .85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .regla-texto strong {
+      display: block;
+      color: var(--accent-h);
+      font-size: .92rem;
+      margin-bottom: 3px;
+    }
+    .regla-texto p {
+      margin: 0;
+      font-size: .85rem;
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .regla-texto p em {
+      color: var(--warn);
+      font-style: normal;
+      font-weight: 700;
+    }
+    #reglas-resumen {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 24px;
+      justify-content: center;
+    }
+    #reglas-resumen span {
+      font-size: .82rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    #btn-aceptar-reglas {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #000;
+      font-size: 1.05rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background .2s, transform .1s;
+      letter-spacing: .03em;
+    }
+    #btn-aceptar-reglas:hover  { background: var(--accent-h); }
+    #btn-aceptar-reglas:active { transform: scale(.97); }
+
+    /* ── Pantalla de Juego ─────────────────────────────── */
+    #pantalla-juego {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 680px;
+      gap: 18px;
+    }
+
+    /* Cabecera del jugador */
+    #cabecera-juego {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px 18px;
+    }
+    #nombre-display { font-size: 1.1rem; font-weight: 700; color: var(--accent-h); }
+    #estado-partida {
+      font-size: .82rem;
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: var(--surface2);
+      color: var(--muted);
+    }
+    #estado-partida.activa   { background: #14532d; color: var(--success); }
+    #estado-partida.finalizada { background: #450a0a; color: var(--danger); }
+
+    /* Cartón 5×5 */
+    #carton {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      width: 100%;
+    }
+    .celda-jugador {
+      background: var(--surface);
+      border: 2px solid #3d3500;
+      border-radius: 8px;
+      padding: 8px 4px;
+      min-height: 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: .9rem;
+      line-height: 1.3;
+      word-break: break-word;
+      transition: all .3s ease;
+      user-select: none;
+      gap: 4px;
+      position: relative;
+    }
+    .celda-jugador .celda-img {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    /* Estado: no cantada — legible pero apagada */
+    .celda-jugador.no-cantada {
+      cursor: default;
+    }
+    /* Estado: penalizada por clicks en no-cantada */
+    .celda-jugador.penalizada {
+      background: linear-gradient(135deg, #450a0a, #7f1d1d);
+      border-color: #ef4444;
+      color: #fca5a5;
+      cursor: not-allowed;
+      box-shadow: 0 0 10px rgba(239,68,68,.5);
+    }
+    .celda-penalizada-countdown {
+      position: absolute;
+      bottom: 4px;
+      right: 6px;
+      font-size: .75rem;
+      font-weight: 700;
+      color: #ef4444;
+      background: rgba(0,0,0,.55);
+      border-radius: 4px;
+      padding: 1px 5px;
+      pointer-events: none;
+    }
+    /* Imagen de fondo sin recorte de border-radius */
+    .celda-bg-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      z-index: 0;
+      pointer-events: none;
+    }
+    /* Casillas con foto de fondo */
+    .celda-con-foto::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.50);
+      z-index: 1;
+      pointer-events: none;
+      transition: background .3s ease;
+    }
+    .celda-con-foto.marcada::before {
+      background: rgba(34, 197, 94, 0.15);
+    }
+    .celda-con-foto.penalizada::before {
+      background: rgba(69, 10, 10, 0.88);
+    }
+    /* Todo el contenido directo por encima del overlay (excepto la imagen) */
+    .celda-con-foto > *:not(.celda-bg-img) {
+      position: relative;
+      z-index: 2;
+    }
+    /* Texto: mismo estilo en todas las casillas, tenga foto o no */
+    .celda-jugador span {
+      font-weight: 700;
+      font-size: .85rem;
+      color: #ffffff;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,.95),
+         1px -1px 0 rgba(0,0,0,.95),
+        -1px  1px 0 rgba(0,0,0,.95),
+         1px  1px 0 rgba(0,0,0,.95),
+         0    0   8px rgba(0,0,0,.7);
+    }
+    /* Overrides de color por estado — sobre el span directamente */
+    .celda-jugador.marcada    span { color: #86efac; }
+    .celda-jugador.penalizada span { color: #fca5a5; }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20%      { transform: translateX(-6px); }
+      40%      { transform: translateX(6px); }
+      60%      { transform: translateX(-4px); }
+      80%      { transform: translateX(4px); }
+    }
+    .celda-jugador.shake { animation: shake 0.35s ease; }
+    /* Estado: cantada pero no marcada — misma apariencia que no-cantada (clickable) */
+    .celda-jugador.cantada:not(.marcada) {
+      cursor: default;
+    }
+    /* Estado: marcada por el jugador — tachada con énfasis */
+    .celda-jugador.marcada {
+      background: linear-gradient(135deg, #14532d, #166534);
+      border-color: var(--success);
+      font-weight: 700;
+      text-decoration: line-through;
+      text-decoration-color: #86efac99;
+      box-shadow: 0 0 12px rgba(34,197,94,.4);
+      cursor: default;
+      animation: pulso-boton 1.4s ease-in-out infinite alternate;
+    }
+    @keyframes pulso-boton {
+      from { box-shadow: 0 0 6px 2px rgba(255,255,255,.2); }
+      to   { box-shadow: 0 0 22px 6px rgba(255,255,255,.5); }
+    }
+    @keyframes aparecer {
+      from { transform: scale(.9); opacity: .4; }
+      to   { transform: scale(1); opacity: 1; }
+    }
+
+    /* Botones de acción */
+    #acciones {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+    }
+    #acciones button {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1.15rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    #btn-linea {
+      background: var(--warn);
+      color: #000;
+    }
+    #btn-linea:hover  { background: #fcd34d; }
+    #btn-bingo {
+      background: var(--success);
+      color: #000;
+    }
+    #btn-bingo:hover  { background: #4ade80; }
+    /* Bloqueo global durante penalización de casilla */
+    #carton.bloqueado { pointer-events: none; }
+    #carton.bloqueado .celda-jugador:not(.penalizada) { opacity: 0.35; filter: grayscale(60%); }
+    #acciones.bloqueado { pointer-events: none; }
+    #acciones.bloqueado button { opacity: 0.35; filter: grayscale(60%); cursor: not-allowed; }
+
+    /* ── Notificaciones en pantalla ────────────────────── */
+    #notificacion {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-80px);
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 14px 24px;
+      font-size: .95rem;
+      font-weight: 600;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+      transition: transform .4s cubic-bezier(.34,1.56,.64,1);
+      z-index: 999;
+      text-align: center;
+      max-width: 90vw;
+      border: 2px solid transparent;
+    }
+    #notificacion.visible  { transform: translateX(-50%) translateY(0); }
+    #notificacion.ok       { border-color: var(--success); color: var(--success); }
+    #notificacion.error    { border-color: var(--danger);  color: var(--danger); }
+    #notificacion.info     { border-color: var(--accent);  color: var(--accent-h); }
+
+    /* ── Banner de anuncio (para línea/bingo de otro jugador) ── */
+    #banner-anuncio {
+      display: none;
+      width: 100%;
+      padding: 10px 18px;
+      border-radius: var(--radius);
+      text-align: center;
+      font-weight: 700;
+      font-size: .92rem;
+    }
+    #banner-anuncio.linea { background: #451a0333; border: 1px solid var(--warn);    color: var(--warn); }
+    #banner-anuncio.bingo { background: #052e1633; border: 1px solid var(--success); color: var(--success); }
+
+    /* ── Scrollbar ─────────────────────────────────────── */
+    ::-webkit-scrollbar       { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #3d3500; border-radius: 2px; }
+    /* ── Modal de premio al jugador ─────────────────────── */
+    #modal-premio {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.85);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 20px;
+      padding: 24px;
+      text-align: center;
+    }
+    #modal-premio.visible { display: flex; }
+    #modal-premio img {
+      max-width: min(280px, 80vw);
+      border-radius: 16px;
+      box-shadow: 0 0 40px rgba(255,255,255,.15);
+      animation: aparecer .4s ease;
+    }
+    #modal-premio p {
+      font-size: 1.5rem;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 20px currentColor;
+      max-width: 380px;
+    }
+    #modal-premio p.linea-msg { color: var(--warn); }
+    #modal-premio p.bingo-msg { color: var(--success); }
+    #modal-premio button {
+      padding: 12px 36px;
+      border: none;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    #modal-premio button:hover { background: var(--accent-h); }
+
+    /* ══════════════════════════════════════════════════════
+       RESPONSIVE — MÓVIL
+       ══════════════════════════════════════════════════════ */
+
+    /* ── Ajustes base para cualquier pantalla estrecha ── */
+    @media (max-width: 600px) {
+
+      /* Header más compacto */
+      header {
+        padding: 10px 14px;
+      }
+      header h1 {
+        font-size: 1.1rem;
+      }
+
+      /* Quitar padding vertical sobrante del contenedor */
+      #contenido {
+        padding: 12px 10px;
+        justify-content: flex-start;
+      }
+
+      /* ── Login ── */
+      #pantalla-login {
+        gap: 10px;
+        max-width: 100%;
+      }
+      #pantalla-login button {
+        padding: 16px;        /* tap target generoso */
+        font-size: 1rem;
+      }
+      #discord-step input {
+        font-size: 16px;      /* evita zoom automático en iOS */
+        padding: 14px 12px;
+      }
+
+      /* ── Reglas ── */
+      #pantalla-reglas {
+        max-width: 100%;
+        gap: 12px;
+      }
+      #reglas-card {
+        padding: 18px 14px 16px;
+        gap: 14px;
+      }
+      #reglas-card h2 {
+        font-size: 1.05rem;
+      }
+      .regla-texto strong {
+        font-size: .88rem;
+      }
+      .regla-texto p {
+        font-size: .82rem;
+      }
+      #reglas-resumen {
+        gap: 8px 16px;
+      }
+      #reglas-resumen span {
+        font-size: .78rem;
+        white-space: normal;
+      }
+      #btn-aceptar-reglas {
+        padding: 17px;
+        font-size: 1rem;
+      }
+
+      /* ── Pantalla de juego ── */
+      #pantalla-juego {
+        gap: 10px;
+        max-width: 100%;
+      }
+
+      /* Cabecera jugador más compacta */
+      #cabecera-juego {
+        padding: 8px 12px;
+        border-radius: 8px;
+      }
+      #nombre-display {
+        font-size: .95rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 55vw;
+      }
+      #estado-partida {
+        font-size: .72rem;
+        padding: 3px 9px;
+        white-space: nowrap;
+      }
+
+      /* Cartón: celdas más pequeñas, sin tanto padding */
+      #carton {
+        gap: 4px;
+      }
+      .celda-jugador {
+        min-height: 54px;
+        padding: 5px 3px;
+        font-size: .72rem;
+        border-radius: 6px;
+        border-width: 1.5px;
+        gap: 2px;
+      }
+      .celda-jugador span {
+        font-size: .68rem;
+        text-shadow:
+          -1px -1px 0 rgba(0,0,0,1),
+           1px -1px 0 rgba(0,0,0,1),
+          -1px  1px 0 rgba(0,0,0,1),
+           1px  1px 0 rgba(0,0,0,1);
+      }
+      .celda-penalizada-countdown {
+        font-size: .65rem;
+        padding: 1px 3px;
+        bottom: 2px;
+        right: 3px;
+      }
+
+      /* Botones Línea / Bingo — más altos para fácil toque */
+      #acciones {
+        gap: 8px;
+      }
+      #acciones button {
+        padding: 18px 10px;
+        font-size: 1rem;
+        border-radius: 10px;
+      }
+
+      /* Notificación flotante — más compacta y alejada del borde */
+      #notificacion {
+        top: 12px;
+        padding: 10px 16px;
+        font-size: .85rem;
+        max-width: 92vw;
+      }
+
+      /* Banner anuncio */
+      #banner-anuncio {
+        font-size: .82rem;
+        padding: 8px 12px;
+      }
+
+      /* Modal premio — texto más pequeño */
+      #modal-premio p {
+        font-size: 1.2rem;
+      }
+      #modal-premio button {
+        padding: 14px 28px;
+        font-size: .95rem;
+      }
+    }
+
+    /* ── Pantallas muy pequeñas (≤380px, iPhone SE, etc.) ── */
+    @media (max-width: 380px) {
+      #carton {
+        gap: 3px;
+      }
+      .celda-jugador {
+        min-height: 46px;
+        padding: 4px 2px;
+        font-size: .65rem;
+      }
+      .celda-jugador span {
+        font-size: .6rem;
+      }
+      #acciones button {
+        font-size: .9rem;
+        padding: 16px 6px;
+      }
+      header h1 {
+        font-size: .95rem;
+      }
+    }
+
+    /* ── Sin hover en táctil (evitar estados pegados) ── */
+    @media (hover: none) {
+      #pantalla-login button:hover  { background: var(--accent); }
+      #btn-aceptar-reglas:hover     { background: var(--accent); }
+      #btn-linea:hover  { background: var(--warn); }
+      #btn-bingo:hover  { background: var(--success); }
+      .celda-jugador    { -webkit-tap-highlight-color: transparent; }
+    }
+
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎱 Bingoelus</h1>
+</header>
+
+<div id="contenido">
+
+<!-- ════════ MODAL PREMIO JUGADOR ════════ -->
+<div id="modal-premio">
+  <img id="modal-premio-img" src="" alt="Premio" />
+  <p id="modal-premio-msg"></p>
+  <button id="modal-premio-btn">Continuar ▶</button>
+</div>
+
+<!-- ════════ NOTIFICACIÓN FLOTANTE ════════ -->
+<div id="notificacion"></div>
+
+<!-- ════════ PANTALLA DE LOGIN ════════ -->
+<div id="pantalla-login">
+
+  <!-- Estado: verificando sesión / errores OAuth -->
+  <div id="twitch-loading">🟣 Verificando sesión de Twitch...</div>
+
+  <!-- Tarjeta Twitch (visible al confirmarse la sesión) -->
+  <div id="twitch-card">
+    <div id="twitch-avatar"></div>
+    <div id="twitch-card-info">
+      <div id="twitch-card-name"></div>
+      <div id="twitch-card-login"></div>
+    </div>
+    <a id="twitch-logout" href="/auth/twitch/logout">Cambiar cuenta</a>
+  </div>
+
+  <!-- Paso Discord (visible tras confirmar sesión Twitch) -->
+  <div id="discord-step">
+    <label for="input-discord">👾 ¿Cuál es tu nombre en el servidor de Discord?</label>
+    <input id="input-discord" type="text" placeholder="Tu nombre en Discord" maxlength="32" autocomplete="off" />
+    <span id="discord-error">Debes introducir tu nombre de Discord para poder jugar.</span>
+  </div>
+
+  <button id="btn-entrar" style="display:none">▶ Entrar al juego</button>
+  <div id="msg-espera" style="display:none">
+    ⏳ Esperando que el gestor inicie una partida...
+  </div>
+</div>
+
+<!-- ════════ PANTALLA DE REGLAS ════════ -->
+<div id="pantalla-reglas">
+  <div id="reglas-card">
+    <h2>🎱 <span>Cómo Jugar</span> — BINGOELUS</h2>
+
+    <div class="regla">
+      <div class="regla-num">1</div>
+      <div class="regla-texto">
+        <strong>¿Cómo funciona?</strong>
+        <p>Tienes un cartón de 5×5 con 25 frases. Cuando Andrea lo haga o diga, o cuando Joelus diga que se puede, ¡marca esa casilla!</p>
+      </div>
+    </div>
+
+    <div class="regla">
+      <div class="regla-num">2</div>
+      <div class="regla-texto">
+        <strong>Atiende al stream</strong>
+        <p>El cartón <em>no te avisa de nada</em>. No hay colores ni pistas de qué casillas han salido. Tienes que estar mirando el directo para enterarte.</p>
+      </div>
+    </div>
+
+    <div class="regla">
+      <div class="regla-num">3</div>
+      <div class="regla-texto">
+        <strong>Marcar una casilla</strong>
+        <p>Pulsa una casilla para marcarla o desmarcarla libremente según vaya ocurriendo en el stream. El sistema cuenta con <em>protección anti-spam</em>, por lo que no podrás clicar a lo loco sin que haya salido.</p>
+      </div>
+    </div>
+
+    <div class="regla">
+      <div class="regla-num">4</div>
+      <div class="regla-texto">
+        <strong>¡Línea!</strong>
+        <p>5 casillas seguidas marcadas en horizontal <em>o</em> vertical (no vale diagonal). Pulsa <em>¡Línea!</em> antes que nadie para ganar el premio.</p>
+      </div>
+    </div>
+
+    <div class="regla">
+      <div class="regla-num">5</div>
+      <div class="regla-texto">
+        <strong>¡Bingo!</strong>
+        <p>Cuando tengas el cartón completo (o casi, según decida Joelus), pulsa <em>¡Bingo!</em> a toda velocidad. El primero en reclamarlo válido gana.</p>
+      </div>
+    </div>
+
+    <div class="regla">
+      <div class="regla-num">6</div>
+      <div class="regla-texto">
+        <strong>Reclamar en falso</strong>
+        <p>Si reclamas Línea o Bingo sin tenerlo, tu cartón se bloquea. El sistema comprueba tus marcas en tiempo real.</p>
+      </div>
+    </div>
+
+    <div id="reglas-resumen">
+      <span>👁 Mira el stream</span>
+      <span>✅ Marca lo que haya pasado</span>
+      <span>⏳ Evita el spam al hacer clics</span>
+      <span>🏆 Reclama ¡Línea! o ¡Bingo! a tiempo</span>
+    </div>
+  </div>
+
+  <button id="btn-aceptar-reglas">¡Entendido, a jugar! 🎱</button>
+</div>
+
+<!-- ════════ PANTALLA DE JUEGO ════════ -->
+<div id="pantalla-juego">
+
+  <div id="cabecera-juego">
+    <span id="nombre-display"></span>
+    <span id="estado-partida">Conectado</span>
+  </div>
+
+  <div id="banner-anuncio"></div>
+
+  <div id="carton"></div>
+
+  <div id="acciones">
+    <button id="btn-linea">🎉 ¡Línea!</button>
+    <button id="btn-bingo">🏆 ¡Bingo!</button>
+  </div>
+
+</div><!-- fin #contenido -->
+
+<!-- Socket.io -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/cliente.js"></script>
+</body>
+</html>

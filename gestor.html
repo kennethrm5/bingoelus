@@ -10,18 +10,18 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0f172a;
-      --surface:   #1e293b;
-      --surface2:  #273549;
-      --accent:    #6366f1;
-      --accent-h:  #818cf8;
+      --bg:        #0d0b00;
+      --surface:   #181400;
+      --surface2:  #221e00;
+      --accent:    #f5b800;
+      --accent-h:  #ffd44d;
       --success:   #22c55e;
       --danger:    #ef4444;
-      --warn:      #f59e0b;
-      --text:      #e2e8f0;
-      --muted:     #94a3b8;
+      --warn:      #fb923c;
+      --text:      #fdf6d8;
+      --muted:     #9a8040;
       --radius:    10px;
-      --shadow:    0 4px 24px rgba(0,0,0,.45);
+      --shadow:    0 4px 24px rgba(0,0,0,.65);
     }
 
     body {
@@ -42,17 +42,17 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-bottom: 1px solid #334155;
+      border-bottom: 1px solid #3d3500;
       box-shadow: var(--shadow);
     }
     header h1 { font-size: 1.4rem; color: var(--accent-h); letter-spacing: .05em; }
     #url-publica {
       background: var(--surface2);
-      border: 1px solid #4f46e5;
+      border: 1px solid var(--accent);
       border-radius: var(--radius);
       padding: 6px 14px;
       font-size: .85rem;
-      color: var(--warn);
+      color: var(--accent-h);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -67,7 +67,7 @@
       background: var(--accent);
       border: none;
       border-radius: 6px;
-      color: #fff;
+      color: #000;
       cursor: pointer;
       padding: 4px 10px;
       font-size: .8rem;
@@ -127,7 +127,7 @@
       width: 100%;
       height: 130px;
       background: var(--bg);
-      border: 1px solid #334155;
+      border: 1px solid #3d3500;
       border-radius: 7px;
       color: var(--text);
       font-size: .85rem;
@@ -144,7 +144,7 @@
       border: none;
       border-radius: 7px;
       background: var(--accent);
-      color: #fff;
+      color: #000;
       font-size: .95rem;
       font-weight: 600;
       cursor: pointer;
@@ -153,7 +153,7 @@
     }
     button.primary:hover  { background: var(--accent-h); }
     button.primary:active { transform: scale(.97); }
-    button.danger  { background: var(--danger); }
+    button.danger  { background: var(--danger); color: #fff; }
     button.danger:hover  { background: #f87171; }
 
     /* Lista de frases cantables */
@@ -170,7 +170,7 @@
     }
     .btn-frase {
       padding: 8px 12px;
-      border: 1px solid #334155;
+      border: 1px solid #3d3500;
       border-radius: 7px;
       background: var(--surface2);
       color: var(--text);
@@ -180,7 +180,7 @@
       transition: all .18s;
       word-break: break-word;
     }
-    .btn-frase:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+    .btn-frase:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #000; }
     .btn-frase:disabled {
       background: #1a3a1a;
       border-color: var(--success);
@@ -203,8 +203,8 @@
     #ganadores-header .ganador-bingo { color: var(--success); margin-left: 6px; }
     .badge-offline {
       font-size: .68rem; font-weight: 700; padding: 2px 7px;
-      border-radius: 4px; border: 1px solid #475569;
-      background: transparent; color: #64748b;
+      border-radius: 4px; border: 1px solid #3d3500;
+      background: transparent; color: var(--muted);
       margin-left: 4px;
     }
     .jugador-offline .jugador-cabecera { opacity: .55; }
@@ -225,7 +225,7 @@
     }
     .jugador-fila {
       background: var(--surface2);
-      border: 1px solid #334155;
+      border: 1px solid #3d3500;
       border-radius: var(--radius);
       overflow: hidden;
       transition: border-color .2s;
@@ -240,7 +240,7 @@
       user-select: none;
       transition: background .15s;
     }
-    .jugador-cabecera:hover { background: rgba(99,102,241,.12); }
+    .jugador-cabecera:hover { background: rgba(245,184,0,.10); }
     .jugador-nombre {
       font-size: .92rem;
       font-weight: 600;
@@ -328,7 +328,7 @@
       transition: background .2s;
     }
     #btn-reclamaciones.off {
-      background: #334155;
+      background: #2c2700;
       color: var(--muted);
     }
     #btn-reclamaciones.on {
@@ -405,7 +405,7 @@
       border: none;
       border-radius: 8px;
       background: var(--accent);
-      color: #fff;
+      color: #000;
       cursor: pointer;
     }
     @keyframes pulso {
@@ -416,7 +416,7 @@
     /* ── Scrollbars personalizados ────────────────────────── */
     ::-webkit-scrollbar       { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: #3d3500; border-radius: 3px; }
 
     /* ── Tarjeta de música (inline: título + controles en la misma fila) ─ */
     #card-musica {
@@ -442,10 +442,10 @@
       color: var(--text);
       cursor: pointer;
       font-size: .82rem;
-      border: 1px solid #334155;
+      border: 1px solid #3d3500;
       transition: background .15s;
     }
-    #card-musica button:hover { background: var(--accent); border-color: var(--accent); }
+    #card-musica button:hover { background: var(--accent); border-color: var(--accent); color: #000; }
     #lbl-vol { color: var(--muted); font-size: .82rem; min-width: 40px; text-align: center; }
     #btn-claxon {
       width: 100%;
@@ -483,18 +483,45 @@
     .connect-card p  { color: var(--muted); font-size: .88rem; text-align: center; }
     .connect-card input {
       width: 100%; background: var(--bg);
-      border: 1px solid #334155; border-radius: 7px;
+      border: 1px solid #3d3500; border-radius: 7px;
       color: var(--text); font-size: .9rem;
       padding: 10px 12px; outline: none; transition: border-color .2s;
     }
     .connect-card input:focus { border-color: var(--accent); }
     .connect-card button {
       padding: 11px; border: none; border-radius: 7px;
-      background: var(--accent); color: #fff;
+      background: var(--accent); color: #000;
       font-size: .95rem; font-weight: 600;
       cursor: pointer; transition: background .2s;
     }
     .connect-card button:hover { background: var(--accent-h); }
+
+    #overlay-musica {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 1001;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    #overlay-musica button {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: .9rem;
+      transition: background .15s;
+    }
+    #overlay-musica button:hover { background: var(--accent); }
   </style>
 </head>
 <body>
@@ -504,11 +531,20 @@
   <div class="connect-card">
     <h2>🎱 Bingoelus — Gestor</h2>
     <p>Introduce la URL del servidor y el token para conectar.</p>
-    <input id="input-srv-url" type="url" placeholder="https://xxx.trycloudflare.com" autocomplete="off" />
+    <input id="input-srv-url" type="url" placeholder="https://bingoelus.online" autocomplete="off" />
     <input id="input-gestor-token" type="password" placeholder="Token del gestor" autocomplete="off"
       onkeydown="if(event.key==='Enter')conectar()" />
     <button onclick="conectar()">Conectar</button>
     <p id="connect-error" style="color:var(--danger);min-height:1.2em;"></p>
+  </div>
+  <!-- Control de música en el overlay para que Joelus no se quede sordo -->
+  <div id="overlay-musica">
+    <span style="font-size:.85rem;opacity:.7;">🎵 Música</span>
+    <button id="ovl-btn-play">▶</button>
+    <button id="ovl-btn-pause">⏸</button>
+    <button id="ovl-btn-vol-down">🔉</button>
+    <span id="ovl-lbl-vol">50%</span>
+    <button id="ovl-btn-vol-up">🔊</button>
   </div>
 </div>
 
@@ -544,8 +580,8 @@
       <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <label for="input-umbral" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">Casillas restantes máx. para ¡Bingo!:</label>
         <input type="number" id="input-umbral" min="0" max="25" value="0"
-          style="width:58px;background:var(--bg);border:1px solid #334155;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
-        <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#fff;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
+          style="width:58px;background:var(--bg);border:1px solid #3d3500;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
+        <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#000;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
       </div>
       <button id="btn-claxon">📯 Tocar Claxon</button>
     </div>
@@ -699,7 +735,9 @@
 
   function ytSetVol(v) {
     ytVolumen = Math.max(0, Math.min(100, v));
-    document.getElementById('lbl-vol').textContent = ytVolumen + '%';
+    const txt = ytVolumen + '%';
+    document.getElementById('lbl-vol').textContent     = txt;
+    document.getElementById('ovl-lbl-vol').textContent = txt;
     if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(ytVolumen);
   }
 
@@ -711,6 +749,16 @@
   });
   document.getElementById('btn-vol-up').addEventListener('click', () => ytSetVol(ytVolumen + 10));
   document.getElementById('btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
+
+  // Controles del overlay (misma lógica, sincronizan con los del panel principal)
+  document.getElementById('ovl-btn-play').addEventListener('click', () => {
+    if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
+  });
+  document.getElementById('ovl-btn-pause').addEventListener('click', () => {
+    if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+  });
+  document.getElementById('ovl-btn-vol-up').addEventListener('click',   () => ytSetVol(ytVolumen + 10));
+  document.getElementById('ovl-btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
 
   // ── Claxon mp3 ─────────────────────────────────────────────
   const audioClaxon = new Audio('/media/claxon.mp3');
@@ -1048,6 +1096,24 @@
     renderizarCartones(jugadores, estadoLocal.cantadas);
     const n = jugadores.length;
     agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+  });
+
+  // Delta de marcadas: solo actualiza las celdas de ese jugador sin reconstruir la lista
+  socket.on('partida:marcadas-actualizadas', ({ socketId, marcadas }) => {
+    const jug = estadoLocal.jugadores.find(j => j.socketId === socketId);
+    if (jug) jug.marcadas = marcadas;
+    const fila = listaJugadores.querySelector(`[data-id="${socketId}"]`);
+    if (!fila) return;
+    const marcadasSet = new Set(marcadas);
+    const cantadasSet = new Set(estadoLocal.cantadas);
+    fila.querySelectorAll('.celda').forEach(celda => {
+      const frase = celda.querySelector('span')?.textContent;
+      if (!frase) return;
+      const esCantada = cantadasSet.has(frase);
+      const esMarcada = marcadasSet.has(frase);
+      celda.className = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
+      celda.title = esMarcada ? `✓ Marcada: ${frase}` : frase;
+    });
   });
 
   // Línea válida

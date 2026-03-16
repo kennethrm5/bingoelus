@@ -7,7 +7,8 @@
 const path   = require('path');
 const fs     = require('fs');
 const http   = require('http');
-const express = require('express');
+const express    = require('express');
+const compression = require('compression');
 const { Server } = require('socket.io');
 const crypto = require('crypto');
 
@@ -55,10 +56,43 @@ const estado = {
 const rateLimits = {};
 const RATE_LIMIT_MS = 3000;
 
+// Debounce del broadcast de jugadores al gestor
+// Con muchos jugadores se espera más para agrupar más actualizaciones
+let gestorBroadcastTimer = null;
+function scheduledGestorBroadcast() {
+  if (gestorBroadcastTimer) return;
+  const delay = Object.keys(estado.jugadores).length > 500 ? 2000 : 300;
+  gestorBroadcastTimer = setTimeout(() => {
+    gestorBroadcastTimer = null;
+    nsGestor.emit('partida:jugador-unido', resumenJugadores());
+  }, delay);
+}
+
 // ─── Twitch OAuth ─────────────────────────────────────────────
 
 const twitchStates   = new Map();
 const twitchSessions = new Map();
+
+// Cola de tickets estricta para no disparar el WAF de Twitch
+const authQueue = [];
+const ticketResult = new Map();
+let isProcessingQueue = false;
+
+// Limpiar tickets viejos de la memoria para evitar fugas si los usuarios cierran el navegador
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [t, info] of ticketResult) {
+    if (ahora - (info.ts || 0) > 900_000) ticketResult.delete(t);
+  }
+}, 300_000);
+
+// Limpieza periódica de estados huérfanos cada minuto en lugar de en cada petición
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [s, t] of twitchStates) {
+    if (ahora - t > 600_000) twitchStates.delete(s);
+  }
+}, 60000);
 
 function parseCookies(str) {
   const out = {};
@@ -109,11 +143,12 @@ function validarLinea(carton, cantadas, marcadas) {
   return false;
 }
 
-// bingo = celdas sin cantar <= umbral
-function validarBingo(carton, cantadas, umbral) {
+// bingo = celdas sin cantar/sin marcar <= umbral
+function validarBingo(carton, cantadas, marcadas, umbral) {
   const cantadasSet = new Set(cantadas);
-  const sinCantar = carton.flat().filter(f => !cantadasSet.has(f)).length;
-  return sinCantar <= umbral;
+  const marcadasSet = new Set(marcadas);
+  const sinCompletar = carton.flat().filter(f => !(cantadasSet.has(f) && marcadasSet.has(f))).length;
+  return sinCompletar <= umbral;
 }
 
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
@@ -146,35 +181,64 @@ function guardarResultados(ganadoresLinea, ganadoresBingo) {
 
 // ─── Resumen de jugadores (para el gestor) ───────────────────
 
+// Con pocos jugadores manda el listado completo.
+// Con muchos (>300) manda solo estadísticas + ganadores para no saturar.
+const GESTOR_FULL_THRESHOLD = 300;
+
 function resumenJugadores() {
-  const online = Object.values(estado.jugadores).map(j => ({
-    socketId:      j.socketId,
-    nombre:        j.nombre,
-    twitch:        j.twitch || '',
+  const jugadoresArr = Object.values(estado.jugadores);
+  const onlineLogins = new Set(jugadoresArr.map(j => j.twitch));
+
+  const offlineArr = Object.entries(estado.tokens)
+    .filter(([login, datos]) => !onlineLogins.has(login) && datos.nombre);
+
+  const total  = jugadoresArr.length + offlineArr.length;
+  const online = jugadoresArr.length;
+
+  // Ganadores siempre se incluyen (pocos en cualquier caso)
+  const ganadoresLinea = jugadoresArr
+    .filter(j => j.cantadoLinea)
+    .map(j => ({ socketId: j.socketId, nombre: j.nombre, twitch: j.twitch, cantadoLinea: true, cantadoBingo: j.cantadoBingo, online: true }));
+  const ganadoresBingo = jugadoresArr
+    .filter(j => j.cantadoBingo)
+    .map(j => ({ socketId: j.socketId, nombre: j.nombre, twitch: j.twitch, cantadoLinea: j.cantadoLinea, cantadoBingo: true, online: true }));
+
+  if (total > GESTOR_FULL_THRESHOLD) {
+    // Modo compacto: el gestor recibe estadísticas + ganadores, no todos los cartones
+    return {
+      modo:           'compacto',
+      totalJugadores: total,
+      online,
+      ganadores:      [...new Map([...ganadoresLinea, ...ganadoresBingo].map(g => [g.twitch, g])).values()],
+    };
+  }
+
+  // Modo completo (<=300 jugadores)
+  const listaOnline = jugadoresArr.map(j => ({
+    socketId:       j.socketId,
+    nombre:         j.nombre,
+    twitch:         j.twitch || '',
     twitchVerified: j.twitchVerified || false,
-    carton:        j.carton,
-    cantadoLinea:  j.cantadoLinea,
-    cantadoBingo:  j.cantadoBingo,
-    marcadas:      j.marcadas || [],
-    online:        true,
+    carton:         j.carton,
+    cantadoLinea:   j.cantadoLinea,
+    cantadoBingo:   j.cantadoBingo,
+    marcadas:       j.marcadas || [],
+    online:         true,
   }));
 
-  const onlineLogins = new Set(Object.values(estado.jugadores).map(j => j.twitch));
-  const offline = Object.entries(estado.tokens)
-    .filter(([login, datos]) => !onlineLogins.has(login) && datos.nombre)
-    .map(([login, datos]) => ({
-      socketId:      `offline-${login}`,
-      nombre:        datos.nombre,
-      twitch:        login,
-      twitchVerified: true,
-      carton:        datos.carton,
-      cantadoLinea:  datos.cantadoLinea || false,
-      cantadoBingo:  datos.cantadoBingo || false,
-      marcadas:      datos.marcadas || [],
-      online:        false,
-    }));
+  const listaOffline = offlineArr.map(([login, datos]) => ({
+    socketId:       `offline-${login}`,
+    nombre:         datos.nombre,
+    twitch:         login,
+    twitchVerified: true,
+    carton:         datos.carton,
+    cantadoLinea:   datos.cantadoLinea || false,
+    cantadoBingo:   datos.cantadoBingo || false,
+    marcadas:       datos.marcadas || [],
+    online:         false,
+  }));
 
-  return [...online, ...offline];
+  return { modo: 'completo', totalJugadores: total, online, jugadores: [...listaOnline, ...listaOffline] };
 }
 
 // ─── Express + Socket.io ──────────────────────────────────────
@@ -183,13 +247,19 @@ const expressApp = express();
 const httpServer = http.createServer(expressApp);
 const io = new Server(httpServer, {
   cors: {
-    // Permite que el gestor (Electron, localhost) se conecte al namespace /gestor
     origin: true,
     credentials: true,
   },
+  // Preferir WebSocket: evita el doble round-trip de polling
+  transports: ['websocket', 'polling'],
+  // Reduce overhead de paquetes
+  pingInterval: 25000,
+  pingTimeout: 20000,
 });
 
 expressApp.disable('x-powered-by');
+// Gzip en todas las respuestas HTTP (reduce ancho de banda ~70%)
+expressApp.use(compression());
 
 // Twitch OAuth
 expressApp.get('/auth/twitch', (_req, res) => {
@@ -198,7 +268,6 @@ expressApp.get('/auth/twitch', (_req, res) => {
     return;
   }
   const ahora = Date.now();
-  for (const [s, t] of twitchStates) if (ahora - t > 600_000) twitchStates.delete(s);
 
   const state = crypto.randomBytes(16).toString('hex');
   twitchStates.set(state, ahora);
@@ -213,7 +282,7 @@ expressApp.get('/auth/twitch', (_req, res) => {
   res.redirect(`https://id.twitch.tv/oauth2/authorize?${qs}`);
 });
 
-expressApp.get('/auth/twitch/callback', async (req, res) => {
+expressApp.get('/auth/twitch/callback', (req, res) => {
   const code  = typeof req.query.code  === 'string' ? req.query.code  : '';
   const state = typeof req.query.state === 'string' ? req.query.state : '';
   const error = typeof req.query.error === 'string' ? req.query.error : '';
@@ -224,40 +293,153 @@ expressApp.get('/auth/twitch/callback', async (req, res) => {
   if (!stateTs || Date.now() - stateTs > 600_000) { res.redirect('/?twitch_error=estado_invalido'); return; }
   twitchStates.delete(state);
 
-  try {
-    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id:     cfg.clientId,
-        client_secret: cfg.clientSecret,
-        code,
-        grant_type:    'authorization_code',
-        redirect_uri:  getCallbackUrl(),
-      }).toString(),
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) throw new Error('No se recibió access_token');
+  // En lugar de una conexión HTTP suspendida (que fallaría con demasiada gente),
+  // emitimos un ID de ticket e insertamos al usuario en la cola. 
+  // La página de espera hará "polling" de su ticket.
+  const ticket = crypto.randomBytes(16).toString('hex');
+  ticketResult.set(ticket, { status: 'waiting', ts: Date.now() });
+  authQueue.push({ ticket, code, state });
+  
+  // Arrancamos el procesador de cola si no estaba andando
+  processAuthQueue();
 
-    const userRes = await fetch('https://api.twitch.tv/helix/users', {
-      headers: {
-        'Authorization': `Bearer ${tokenData.access_token}`,
-        'Client-Id':     cfg.clientId,
-      },
-    });
-    const userData = await userRes.json();
-    const user = userData?.data?.[0];
-    if (!user) throw new Error('No se obtuvieron datos del usuario');
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Autenticando... | Bingoelus</title>
+      <style>
+        body { background: #18181b; color: #efeff1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; }
+        .spinner { width: 50px; height: 50px; border: 5px solid rgba(145, 70, 255, 0.2); border-top-color: #9146FF; border-radius: 50%; animation: spin 1s ease-in-out infinite; margin-bottom: 20px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        h2 { margin: 0 0 10px 0; font-size: 24px; }
+        #cola { color: #fbbf24; background: rgba(251, 191, 36, 0.1); padding: 15px 20px; border-radius: 8px; max-width: 400px; font-weight: 500; font-size: 15px; border: 1px solid rgba(251, 191, 36, 0.2); margin-top: 20px; display: none; }
+        #cola.visible { display: block; }
+        .pos-resaltada { font-size: 1.2em; font-weight: bold; color: #fff; }
+      </style>
+    </head>
+    <body>
+      <div class="spinner"></div>
+      <h2 id="titulo">Conectando con Twitch...</h2>
+      <div id="cola">⏳ Hay un pico de jugadores simultáneos.<br><br>Estás en la posición <span id="pos" class="pos-resaltada">-</span> de la sala de espera.<br><br>No cierres ni recargues la ventana, entrarás automáticamente.</div>
+      
+      <script>
+        const ticket = "${ticket}";
+        function poll() {
+          fetch('/auth/twitch/status?ticket=' + ticket)
+            .then(r => r.json())
+            .then(data => {
+              if (data.status === 'done') {
+                document.getElementById('titulo').innerText = "¡Listo! Redirigiendo...";
+                window.location.href = '/';
+              } else if (data.status === 'error') {
+                window.location.href = '/?twitch_error=' + (data.error || 'error_servidor');
+              } else if (data.status === 'waiting') {
+                if (data.pos > 1) {
+                  document.getElementById('cola').classList.add('visible');
+                  document.getElementById('pos').innerText = data.pos;
+                }
+                setTimeout(poll, 2500); 
+              }
+            })
+            .catch(() => setTimeout(poll, 3000));
+        }
+        setTimeout(poll, 800);
+      </script>
+    </body>
+    </html>
+  `);
+});
 
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    twitchSessions.set(sessionId, { login: user.login, displayName: user.display_name });
-    console.log(`[Twitch] sesión creada para @${user.login}`);
+async function processAuthQueue() {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
 
-    res.setHeader('Set-Cookie', `twitch_sid=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`);
-    res.redirect('/');
-  } catch (err) {
-    console.error('[Twitch] Error en callback OAuth:', err.message);
-    res.redirect('/?twitch_error=error_servidor');
+  const fetchConReintento = async (url, options, maxReintentos = 3) => {
+    for (let i = 0; i < maxReintentos; i++) {
+      const resp = await fetch(url, options);
+      if (resp.status === 429 || resp.status >= 500) {
+        const delay = 1000 + (i * 1000) + Math.random() * 1000;
+        console.warn(`[Twitch] Reteniendo (status ${resp.status})... Reintento ${i + 1}/${maxReintentos} en ${Math.round(delay)}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      return resp;
+    }
+    return fetch(url, options);
+  };
+
+  while (authQueue.length > 0) {
+    // EL TRUCO: Sacamos a los usuarios de 3 en 3 (Abrimos 3 cajeros)
+    const lote = authQueue.splice(0, 3);
+
+    // Promise.all hace que las peticiones del lote viajen al mismo tiempo
+    await Promise.all(lote.map(async ({ ticket, code, state }) => {
+      try {
+        const tokenRes = await fetchConReintento('https://id.twitch.tv/oauth2/token', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id:     cfg.clientId,
+            client_secret: cfg.clientSecret,
+            code,
+            grant_type:    'authorization_code',
+            redirect_uri:  getCallbackUrl(),
+          }).toString(),
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenData.access_token) throw new Error('No se recibió access_token');
+
+        const userRes = await fetchConReintento('https://api.twitch.tv/helix/users', {
+          headers: {
+            'Authorization': `Bearer ${tokenData.access_token}`,
+            'Client-Id':     cfg.clientId,
+          },
+        });
+        const userData = await userRes.json();
+        const user = userData?.data?.[0];
+        if (!user) throw new Error('No se obtuvieron datos del usuario');
+
+        const sessionId = crypto.randomBytes(32).toString('hex');
+        twitchSessions.set(sessionId, { login: user.login, displayName: user.display_name });
+        console.log(`[Twitch] sesión creada para @${user.login} (Cola restante: ${authQueue.length})`);
+
+        ticketResult.set(ticket, { status: 'done', sessionId, ts: Date.now() });
+      } catch (err) {
+        console.error('[Twitch] Error en callback OAuth (authQueue):', err.message);
+        ticketResult.set(ticket, { status: 'error', error: 'error_servidor', ts: Date.now() });
+      }
+    }));
+
+    // Pausa de seguridad después de cada lote de 3.
+    // Garantiza un máximo matemático de ~720 usuarios/minuto (por debajo del límite de 800 de Twitch)
+    await new Promise(r => setTimeout(r, 250));
+  }
+  isProcessingQueue = false;
+}
+
+// Endpoint donde la sala de espera consulta si ya entró
+expressApp.get('/auth/twitch/status', (req, res) => {
+  const ticket = req.query.ticket;
+  if (!ticket) return res.json({ status: 'error', error: 'estado_invalido' });
+  
+  const info = ticketResult.get(ticket);
+  if (!info) return res.json({ status: 'error', error: 'estado_invalido' });
+
+  if (info.status === 'done') {
+    // Clavamos la cookie válida cuando responde 'done'
+    res.setHeader('Set-Cookie', `twitch_sid=${info.sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`);
+    res.json({ status: 'done' });
+  } else if (info.status === 'error') {
+    res.json({ status: 'error', error: info.error });
+  } else {
+    // Calculamos qué posición tiene en la array 'authQueue'
+    const posIndex = authQueue.findIndex(q => q.ticket === ticket);
+    // Si no está en la cola pero es 'waiting', puede que esté en proceso en el lote de 3 (devolvemos 0 para ocultarlo y no haya parpadeo en html)
+    const pos = posIndex === -1 ? 0 : posIndex + 1;
+    res.json({ status: 'waiting', pos });
   }
 });
 
@@ -282,8 +464,17 @@ expressApp.get('/', (req, res, next) => {
   res.redirect('/auth/twitch');
 });
 
-expressApp.use(express.static(path.join(__dirname, 'public')));
-expressApp.use('/media', express.static(path.join(__dirname, 'media')));
+// Cache agresivo en assets estáticos: el navegador no vuelve a pedirlos si ya los tiene
+expressApp.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: '1h',
+  etag: true,
+  lastModified: true,
+}));
+expressApp.use('/media', express.static(path.join(__dirname, 'media'), {
+  maxAge: '7d',   // las imágenes no cambian durante el directo
+  etag: true,
+  immutable: true,
+}));
 
 // ─── Namespaces Socket.io ─────────────────────────────────────
 
@@ -305,7 +496,7 @@ nsGestor.on('connection', (socket) => {
   socket.emit('estado:actual', {
     frases:       estado.frases,
     cantadas:     estado.cantadas,
-    jugadores:    resumenJugadores(),
+    jugadores:    resumenJugadores().jugadores || [],
     lineaGanada:  estado.lineaGanada,
     bingoGanado:  estado.bingoGanado,
     partidaActiva: estado.partidaActiva,
@@ -467,12 +658,13 @@ nsJugador.on('connection', (socket) => {
     const twitchLogin = twUser.login;
 
     const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+    /*
     const ipOcupada = estado.ips[ip];
     if (ipOcupada && ipOcupada !== twitchLogin) {
       socket.emit('partida:error', { msg: 'Ya hay un jugador conectado desde tu red. Solo se permite una cuenta por IP.' });
       return;
     }
-
+    */
     const nombreClean = nombre.trim().slice(0, 24);
     const nombreDuplicado = Object.values(estado.jugadores).some(
       j => j.nombre.toLowerCase() === nombreClean.toLowerCase() && j.twitch !== twitchLogin
@@ -521,38 +713,96 @@ nsJugador.on('connection', (socket) => {
       reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
       umbralReclamo:            estado.umbralReclamo,
     });
-    nsGestor.emit('partida:jugador-unido', { jugadores: resumenJugadores() });
+    nsGestor.emit('partida:jugador-unido', resumenJugadores());
   });
 
   socket.on('jugador:actualizar-marcadas', ({ marcadas } = {}) => {
     const jugador = estado.jugadores[socket.id];
+    const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
-    const cantadasSet = new Set(estado.cantadas);
+
+    // Rate limit: 400ms máximo entre actualizaciones de marcadas por jugador
+    const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
+    if (ahora - (rl.lastMarcadas || 0) < 400) return;
+    rl.lastMarcadas = ahora;
+    rateLimits[socket.id] = rl;
+
     const cartonSet   = new Set(jugador.carton.flat());
     jugador.marcadas = marcadas
-      .filter(f => typeof f === 'string' && cantadasSet.has(f) && cartonSet.has(f))
+      .filter(f => typeof f === 'string' && cartonSet.has(f))
       .slice(0, 25);
     if (estado.tokens[jugador.twitch]) {
       estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
     }
-    nsGestor.emit('partida:jugador-unido', { jugadores: resumenJugadores() });
+    // Delta ligero: solo manda las marcadas actualizadas de este jugador
+    nsGestor.emit('partida:marcadas-actualizadas', { socketId: socket.id, marcadas: jugador.marcadas });
   });
 
-  socket.on('jugador:pedir-linea', () => {
+// Guarda el num de huelgas global, no solo temporales
+const STRIKES_MAX = 3;
+const STRIKE_COOLDOWN_SEG = 20;
+
+function sanitizarMarcadasCarton(jugador, frescas) {
+  if (Array.isArray(frescas)) {
+    const cartonSet = new Set(jugador.carton.flat());
+    jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
+    nsGestor.emit('partida:marcadas-actualizadas', { socketId: jugador.socketId, marcadas: jugador.marcadas });
+  }
+}
+
+function frasePendienteParaLinea(jugador) {
+  const cantadasSet = new Set(estado.cantadas);
+  // Primero: ¿Han marcado alguna mentira?
+  const falsa = jugador.marcadas.find(f => !cantadasSet.has(f));
+  if (falsa) return falsa;
+  // Si no, cogemos la primera que le falte de su cartón para rellenar (una que no esté cantada)
+  const noCantada = jugador.carton.flat().find(f => !cantadasSet.has(f));
+  return noCantada || 'Alguna casilla';
+}
+
+function frasePendienteParaBingo(jugador) {
+  const cantadasSet = new Set(estado.cantadas);
+  const falsa = jugador.marcadas.find(f => !cantadasSet.has(f));
+  if (falsa) return falsa;
+  const noCantada = jugador.carton.flat().find(f => !cantadasSet.has(f));
+  return noCantada || 'Alguna casilla';
+}
+
+function registrarFalloReclamo(jugador, socket, frasePendiente) {
+  jugador.huelgas = (jugador.huelgas || 0) + 1;
+  const errorMsg = `"${frasePendiente}" no ha salido, espabila!`;
+  
+  if (jugador.huelgas >= STRIKES_MAX) {
+    jugador.huelgas = 0;
+    socket.emit('tu:bloqueado', { segs: STRIKE_COOLDOWN_SEG, msg: `Demasiados intentos falsos. Espabila y espera ${STRIKE_COOLDOWN_SEG}s.` });
+  } else {
+    socket.emit('partida:error', { msg: `${errorMsg} (${jugador.huelgas}/${STRIKES_MAX})` });
+  }
+}
+
+  socket.on('jugador:pedir-linea', ({ marcadas: marcadasFrescas } = {}) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
     if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
     if (ahora - rl.lastLinea < RATE_LIMIT_MS) return;
     rl.lastLinea = ahora; rateLimits[socket.id] = rl;
+    
+    // Actualizar marcadas con las frescas del cliente antes de validar
+    sanitizarMarcadasCarton(jugador, marcadasFrescas);
+    
     if (!estado.reclamacionesHabilitadas) { socket.emit('partida:error', { msg: 'El gestor aún no ha habilitado las reclamaciones.' }); return; }
     if (estado.lineaGanada) { socket.emit('partida:error', { msg: 'La línea ya fue cantada por otro jugador.' }); return; }
     if (jugador.cantadoLinea) { socket.emit('partida:error', { msg: 'Ya reclamaste una línea en esta partida.' }); return; }
+    
     if (!validarLinea(jugador.carton, estado.cantadas, jugador.marcadas || [])) {
-      socket.emit('partida:error', { msg: '¡Línea incorrecta! Debes cantar Y marcar todas las casillas de una fila o columna.' });
-      console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE.`);
+      const frase = frasePendienteParaLinea(jugador);
+      registrarFalloReclamo(jugador, socket, frase);
+      console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE. Le falta/falso: ${frase}`);
       return;
     }
+    
+    jugador.huelgas = 0; // reset al acertar
     jugador.cantadoLinea = true;
     estado.lineaGanada   = true;
     estado.reclamacionesHabilitadas = false;
@@ -565,21 +815,30 @@ nsJugador.on('connection', (socket) => {
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
   });
 
-  socket.on('jugador:pedir-bingo', () => {
+  socket.on('jugador:pedir-bingo', ({ marcadas: marcadasFrescas } = {}) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
     if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
     if (ahora - rl.lastBingo < RATE_LIMIT_MS) return;
     rl.lastBingo = ahora; rateLimits[socket.id] = rl;
+    
+    // Actualizar marcadas con las frescas del cliente antes de validar
+    sanitizarMarcadasCarton(jugador, marcadasFrescas);
+    
     if (!estado.reclamacionesHabilitadas) { socket.emit('partida:error', { msg: 'El gestor aún no ha habilitado las reclamaciones.' }); return; }
     if (estado.bingoGanado) { socket.emit('partida:error', { msg: 'El bingo ya fue cantado por otro jugador.' }); return; }
     if (jugador.cantadoBingo) { socket.emit('partida:error', { msg: 'Ya reclamaste bingo en esta partida.' }); return; }
-    if (!validarBingo(jugador.carton, estado.cantadas, estado.umbralReclamo)) {
-      socket.emit('partida:error', { msg: '¡Bingo incorrecto! Faltan frases por cantar.' });
-      console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE.`);
+    
+    // Validar bingo solo requiere umbral según lógica previa, pero también las marcadas deben estar ok
+    if (!validarBingo(jugador.carton, estado.cantadas, jugador.marcadas || [], estado.umbralReclamo)) {
+      const frase = frasePendienteParaBingo(jugador);
+      registrarFalloReclamo(jugador, socket, frase);
+      console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE. Le falta/falso: ${frase}`);
       return;
     }
+    
+    jugador.huelgas = 0; // reset al acertar
     jugador.cantadoBingo = true;
     estado.reclamacionesHabilitadas = false;
     console.log(`[Servidor] 🏆 ${jugador.nombre} cantó BINGO correctamente.`);
@@ -603,7 +862,7 @@ nsJugador.on('connection', (socket) => {
       if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
       delete estado.jugadores[socket.id];
       delete rateLimits[socket.id];
-      nsGestor.emit('partida:jugador-unido', { jugadores: resumenJugadores() });
+      scheduledGestorBroadcast();
     }
   });
 });

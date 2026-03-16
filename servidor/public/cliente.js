@@ -35,21 +35,19 @@ let reclamacionesHabilitadas = false;
 // Mínimo de casillas cantadas en el cartón necesarias para poder reclamar
 let umbralReclamo = 0;
 
-// Sistema de huelgas: 3 malos clicks → penalización temporal
+// Sistema de huelgas global: 3 malos claims (Línea o Bingo) → penalización temporal
 const STRIKES_MAX        = 3;
-const STRIKE_COOLDOWN_MS = 4000;
+const STRIKE_COOLDOWN_MS = 20000;
 let huelgasLinea    = 0;
 let huelgasBingo    = 0;
 let penalizadoLinea = false;
 let penalizadoBingo = false;
-const huelgasCelda    = {}; // frase → nº de malos clicks
-const celdaPenalizada = {}; // frase → boolean
 let penTimerLinea   = null;
 let penTimerBingo   = null;
-const penTimerCelda = {}; // frase → timer id
 
 // referencias DOM
 const pantallaLogin  = document.getElementById('pantalla-login');
+const pantallaReglas = document.getElementById('pantalla-reglas');
 const pantallaJuego  = document.getElementById('pantalla-juego');
 const btnEntrar      = document.getElementById('btn-entrar');
 const msgEspera      = document.getElementById('msg-espera');
@@ -59,6 +57,7 @@ const txtUltimaFrase = null; // elemento eliminado
 const cartonEl       = document.getElementById('carton');
 const btnLinea       = document.getElementById('btn-linea');
 const btnBingo       = document.getElementById('btn-bingo');
+const accionesEl     = document.getElementById('acciones');
 const notificacionEl = document.getElementById('notificacion');
 const bannerAnuncio  = document.getElementById('banner-anuncio');
 
@@ -72,6 +71,52 @@ function mostrarNotif(msg, tipo = 'info', duracion = 3500) {
   notifTimer = setTimeout(() => {
     notificacionEl.className = '';
   }, duracion);
+}
+let btnCountdownIv = null;
+
+// Envío de marcadas con throttle: si el servidor está en rate limit,
+// programa un reintento automático para que el último estado siempre llegue.
+let _ultimoEnvioMarcadas = 0;
+let _timerEnvioMarcadas  = null;
+const RATE_MARCADAS_MS   = 500; // debe coincidir con el servidor
+function enviarMarcadas() {
+  clearTimeout(_timerEnvioMarcadas);
+  const espera = RATE_MARCADAS_MS - (Date.now() - _ultimoEnvioMarcadas);
+  if (espera <= 0) {
+    _ultimoEnvioMarcadas = Date.now();
+    socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
+  } else {
+    _timerEnvioMarcadas = setTimeout(() => {
+      _ultimoEnvioMarcadas = Date.now();
+      socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
+    }, espera);
+  }
+}
+
+function bloquearTodo(segs = STRIKE_COOLDOWN_MS / 1000) {
+  cartonEl.classList.add('bloqueado');
+  accionesEl.classList.add('bloqueado');
+  if (!btnLinea.dataset.textoOriginal) btnLinea.dataset.textoOriginal = btnLinea.textContent;
+  if (!btnBingo.dataset.textoOriginal) btnBingo.dataset.textoOriginal = btnBingo.textContent;
+  let s = segs;
+  const actualizarBtns = () => {
+    btnLinea.textContent = `⛔ Bloqueado (${s}s)`;
+    btnBingo.textContent = `⛔ Bloqueado (${s}s)`;
+  };
+  actualizarBtns();
+  clearInterval(btnCountdownIv);
+  btnCountdownIv = setInterval(() => {
+    s--;
+    if (s > 0) actualizarBtns();
+    else clearInterval(btnCountdownIv);
+  }, 1000);
+}
+function desbloquearTodo() {
+  cartonEl.classList.remove('bloqueado');
+  accionesEl.classList.remove('bloqueado');
+  clearInterval(btnCountdownIv);
+  if (btnLinea.dataset.textoOriginal) { btnLinea.textContent = btnLinea.dataset.textoOriginal; delete btnLinea.dataset.textoOriginal; }
+  if (btnBingo.dataset.textoOriginal) { btnBingo.textContent = btnBingo.dataset.textoOriginal; delete btnBingo.dataset.textoOriginal; }
 }
 
 function mostrarBanner(msg, tipo) {
@@ -116,29 +161,29 @@ function renderizarCarton() {
 
       const imgSrc = CASILLAS_IMG[frase];
       if (imgSrc) {
-        const img = document.createElement('img');
-        img.src       = imgSrc;
-        img.alt       = frase;
-        img.className = 'celda-img';
-        celda.appendChild(img);
+        const imgEl = document.createElement('img');
+        imgEl.src       = imgSrc;
+        imgEl.alt       = '';
+        imgEl.className = 'celda-bg-img';
+        celda.appendChild(imgEl);
+        celda.classList.add('celda-con-foto');
       }
       const span = document.createElement('span');
       span.textContent = frase;
       celda.appendChild(span);
 
-      // El jugador puede tachar una celda SOLO si ya fue cantada
+// El jugador puede tachar una celda en cualquier momento
       celda.addEventListener('click', () => {
-        if (!estado.cantadas.has(frase)) return;
-        if (celdaPenalizada[frase]) return;
-        // Click válido: alternar marcada
+        // Toggle de casilla
         if (estado.marcadas.has(frase)) {
           estado.marcadas.delete(frase);
         } else {
           estado.marcadas.add(frase);
         }
         actualizarCelda(celda, frase);
-        // Notificar al servidor para que el gestor las vea
-        socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
+        
+        // Notificar al servidor
+        enviarMarcadas();
       });
 
       cartonEl.appendChild(celda);
@@ -151,12 +196,12 @@ function actualizarCelda(celdaEl, frase) {
   const cantada = estado.cantadas.has(frase);
   const marcada = estado.marcadas.has(frase);
 
-  celdaEl.classList.remove('cantada', 'marcada', 'no-cantada');
+  celdaEl.classList.remove('cantada', 'marcada', 'no-cantada', 'penalizada');
 
-  if (marcada && cantada) {
-    celdaEl.classList.add('cantada', 'marcada');
-  } else if (cantada) {
-    celdaEl.classList.add('cantada');
+  // El jugador no debe saber visualmente si acertó o no.
+  // Solo se marca.
+  if (marcada) {
+    celdaEl.classList.add('marcada');
   } else {
     celdaEl.classList.add('no-cantada');
   }
@@ -186,14 +231,10 @@ function actualizarBotones() {
 
 // marca/desmarca la clase 'eligible' para dar feedback visual al jugador
 function actualizarEstadoVisualBotones() {
-  const casillasRestantes = estado.carton.flat
-    ? estado.carton.flat().filter(f => !(estado.cantadas.has(f) && estado.marcadas.has(f))).length
-    : 25;
-
   const lineaElegible = reclamacionesHabilitadas && estado.enPartida &&
                         !estado.recibimoLinea && !lineaGanadaGlobal;
   const bingoElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoBingo && casillasRestantes <= umbralReclamo;
+                        !estado.recibimoBingo;
 
   btnLinea.classList.toggle('eligible', lineaElegible);
   btnBingo.classList.toggle('eligible', bingoElegible);
@@ -219,6 +260,7 @@ let twitchUser = null;
             cancelado:       'Cancelaste el inicio de sesión con Twitch.',
             estado_invalido: 'El enlace de Twitch caducó. Inténtalo de nuevo.',
             error_servidor:  'Error al conectar con Twitch. Inténtalo más tarde.',
+            cola_llena:      'Hay mucha gente intentando entrar a la vez. Espera un momento y vuelve a intentarlo.',
           };
           const errMsg = msgs[errorCode] || 'Error desconocido con Twitch.';
           if (loadingEl) {
@@ -284,6 +326,17 @@ function intentarEntrar() {
 
 btnEntrar.addEventListener('click', intentarEntrar);
 
+document.getElementById('btn-aceptar-reglas')?.addEventListener('click', () => {
+  pantallaReglas.style.display = 'none';
+  // En este punto ya tenemos el cartón del servidor,
+  // así que pasamos directamente a la pantalla de juego
+  if (estado.pendienteCarton) {
+    const { carton, cantadas, marcadas } = estado.pendienteCarton;
+    delete estado.pendienteCarton;
+    pasarAPantallaJuego(carton, cantadas, marcadas);
+  }
+});
+
 // Enter en el campo Discord también entra al juego
 document.getElementById('input-discord')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') intentarEntrar();
@@ -295,8 +348,9 @@ function pasarAPantallaJuego(carton, cantadas, marcadasIniciales) {
   estado.marcadas = marcadasIniciales ? new Set(marcadasIniciales) : new Set();
   estado.enPartida = true;
 
-  pantallaLogin.style.display = 'none';
-  pantallaJuego.style.display = 'flex';
+  pantallaLogin.style.display  = 'none';
+  pantallaReglas.style.display = 'none';
+  pantallaJuego.style.display  = 'flex';
 
   estadoPartida.textContent = 'Partida en curso';
   estadoPartida.className   = 'activa';
@@ -318,56 +372,25 @@ btnLinea.addEventListener('click', () => {
   const puedeReclamar = reclamacionesHabilitadas && estado.enPartida &&
                         !estado.recibimoLinea && !lineaGanadaGlobal;
   if (!puedeReclamar) {
-    if (penalizadoLinea) return;
-    huelgasLinea++;
-    if (huelgasLinea >= STRIKES_MAX) {
-      huelgasLinea = 0;
-      penalizadoLinea = true;
-      mostrarNotif('⏳ Demasiados intentos. Espera un momento.', 'error');
-      clearTimeout(penTimerLinea);
-      penTimerLinea = setTimeout(() => { penalizadoLinea = false; }, STRIKE_COOLDOWN_MS);
-    } else {
-      if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
-      else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
-      else if (lineaGanadaGlobal)       mostrarNotif('❌ La línea ya fue cantada.', 'info', 2500);
-      else if (estado.recibimoLinea)    mostrarNotif('✅ Ya reclamaste una línea.', 'info', 2500);
-      else                              mostrarNotif('⚠️ Aún no puedes reclamar línea.', 'info', 2500);
-    }
+    if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
+    else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
+    else if (lineaGanadaGlobal)       mostrarNotif('❌ La línea ya fue cantada.', 'info', 2500);
+    else if (estado.recibimoLinea)    mostrarNotif('✅ Ya reclamaste una línea.', 'info', 2500);
     return;
   }
-  if (penalizadoLinea) return;
-  huelgasLinea = 0;
-  socket.emit('jugador:pedir-linea');
+  socket.emit('jugador:pedir-linea', { marcadas: Array.from(estado.marcadas) });
 });
 
 btnBingo.addEventListener('click', () => {
-  const casillasRestantes = estado.carton.flat().filter(f => !(estado.cantadas.has(f) && estado.marcadas.has(f))).length;
   const puedeReclamar = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoBingo &&
-                        casillasRestantes <= umbralReclamo;
+                        !estado.recibimoBingo;
   if (!puedeReclamar) {
-    if (penalizadoBingo) return;
-    huelgasBingo++;
-    if (huelgasBingo >= STRIKES_MAX) {
-      huelgasBingo = 0;
-      penalizadoBingo = true;
-      mostrarNotif('⏳ Demasiados intentos. Espera un momento.', 'error');
-      clearTimeout(penTimerBingo);
-      penTimerBingo = setTimeout(() => { penalizadoBingo = false; }, STRIKE_COOLDOWN_MS);
-    } else {
-      if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
-      else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
-      else if (estado.recibimoBingo)    mostrarNotif('✅ Ya reclamaste el bingo.', 'info', 2500);
-      else {
-        const faltanTexto = casillasRestantes === 1 ? 'falta 1 casilla' : `faltan ${casillasRestantes} casillas`;
-        mostrarNotif(`⚠️ Aún ${faltanTexto} sin cantar o sin marcar para poder reclamar.`, 'info', 2500);
-      }
-    }
+    if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
+    else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
+    else if (estado.recibimoBingo)    mostrarNotif('✅ Ya reclamaste el bingo.', 'info', 2500);
     return;
   }
-  if (penalizadoBingo) return;
-  huelgasBingo = 0;
-  socket.emit('jugador:pedir-bingo');
+  socket.emit('jugador:pedir-bingo', { marcadas: Array.from(estado.marcadas) });
 });
 
 // eventos socket.io
@@ -386,9 +409,18 @@ socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, 
   lineaGanadaGlobal        = lineaGanada || false;
   umbralReclamo            = umbral ?? 0;
 
-  pasarAPantallaJuego(carton, cantadas, marcadas);
   const esReconexion = marcadas && marcadas.length > 0;
-  mostrarNotif(esReconexion ? '🎱 ¡Reconectado! Tu cartón fue restaurado.' : '🎱 ¡Cartón asignado! Buena suerte.', 'ok');
+  if (esReconexion) {
+    // Reconexión: ir directamente al juego sin reglas
+    pasarAPantallaJuego(carton, cantadas, marcadas);
+    mostrarNotif('🎱 ¡Reconectado! Tu cartón fue restaurado.', 'ok');
+  } else {
+    // Primera vez: mostrar pantalla de reglas
+    estado.pendienteCarton = { carton, cantadas, marcadas };
+    pantallaLogin.style.display  = 'none';
+    pantallaReglas.style.display = 'flex';
+    mostrarNotif('🎱 ¡Cartón asignado! Lee las reglas y pulsa continuar.', 'ok');
+  }
 
   if (lineaGanada) {
     lineaGanadaGlobal = true;
@@ -505,6 +537,12 @@ socket.on('partida:error', ({ msg }) => {
   mostrarNotif(`❌ ${msg}`, 'error');
 });
 
+socket.on('tu:bloqueado', ({ segs, msg }) => {
+  mostrarNotif(`⛔ ${msg}`, 'error', 4000);
+  bloquearTodo(segs);
+  setTimeout(() => desbloquearTodo(), segs * 1000);
+});
+
 // nueva partida → resetear todo y volver al login
 socket.on('partida:nueva', () => {
   Object.assign(estado, {
@@ -525,10 +563,7 @@ socket.on('partida:nueva', () => {
   penalizadoBingo = false;
   clearTimeout(penTimerLinea);
   clearTimeout(penTimerBingo);
-  Object.keys(huelgasCelda).forEach(k => delete huelgasCelda[k]);
-  Object.keys(celdaPenalizada).forEach(k => delete celdaPenalizada[k]);
-  Object.values(penTimerCelda).forEach(t => clearTimeout(t));
-  Object.keys(penTimerCelda).forEach(k => delete penTimerCelda[k]);
+  desbloquearTodo();
 
   // Volver a la pantalla de login
   pantallaJuego.style.display = 'none';
@@ -547,11 +582,7 @@ socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
     estado.marcadas.delete(frase);
     socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
   }
-  // Resetear huelgas de esa celda (ya no está cantada)
-  delete huelgasCelda[frase];
-  delete celdaPenalizada[frase];
-  clearTimeout(penTimerCelda[frase]);
-  delete penTimerCelda[frase];
+  desbloquearTodo();
   actualizarTodasLasCeldas();
   actualizarEstadoVisualBotones();
 });
