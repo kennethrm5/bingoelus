@@ -1,6 +1,6 @@
 {
   "name": "bingoelus-server",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "Servidor standalone de Bingoelus (GCP VM)",
   "main": "server.js",
   "scripts": {

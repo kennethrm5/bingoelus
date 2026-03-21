@@ -456,6 +456,10 @@ expressApp.get('/auth/twitch/logout', (req, res) => {
   res.redirect('/');
 });
 
+  expressApp.get('/api/casillas', (req, res) => {
+    res.sendFile(require('path').join(__dirname, 'casillas.json'), err => { if(err) res.status(404).json({}); });
+  });
+
 expressApp.get('/', (req, res, next) => {
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
@@ -466,7 +470,7 @@ expressApp.get('/', (req, res, next) => {
 
 // Cache agresivo en assets estáticos: el navegador no vuelve a pedirlos si ya los tiene
 expressApp.use(express.static(path.join(__dirname, 'public'), {
-  maxAge: '1h',
+  maxAge: 0, // Desactivado para forzar recarga
   etag: true,
   lastModified: true,
 }));
