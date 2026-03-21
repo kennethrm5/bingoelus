@@ -127,27 +127,22 @@ function mostrarBanner(msg, tipo) {
 }
 
 // frases que tienen imagen asociada en /media/casillas/
-const CASILLAS_IMG = {
-  'Donut o donette':                '/media/casillas/donut_lotus.png',
-  'Macarrones levantavidas':        '/media/casillas/macarrones.png',
-  'Tostadita de las m\u00edas':         '/media/casillas/tostadita.png',
-  'Bocadillete':                    '/media/casillas/bocadillete.png',
-  'Bostez\u00f3n (o intento de)':       '/media/casillas/bostezo.png',
-  'Algo fritaco':                   '/media/casillas/frito.png',
-  'Poncho de palomitas':            '/media/casillas/poncho_palomitas.png',
-  '"Le pregunté a Gemini" o chatgpt': '/media/casillas/chat_gpt.png',
-  'La creatina (mostrada o tomada)':'/media/casillas/creatina.png',
-  '"No soy de dulce"':              '/media/casillas/dulce.png',
-  'Alguna fruta':                   '/media/casillas/fruta.png',
-  'Goku':                           '/media/casillas/goku.png',
-  'Rascarse el papotrón en el gym': '/media/casillas/gym.png',
-  '"Tengo hambre"':                 '/media/casillas/hambre.png',
-  'Hamburguesotrón':                '/media/casillas/hamburguesa.png',
-  'Omega3 (mostrado o tomado)':     '/media/casillas/omega3.png',
-  'Picsa':                          '/media/casillas/picsa.png',
-  'Platotrón cuál Cerro Calderón':  '/media/casillas/platotron.png',
-  'Mucha edición/mucho trabajo':    '/media/casillas/trabajo.png',
-};
+let CASILLAS_IMG = {};
+
+  // Cargamos las imágenes dinámicamente desde el archivo de configuración JSON
+  fetch('/api/casillas')
+    .then(r => r.json())
+    .then(data => {
+      // Le inyectamos la ruta para que HTML la resuelva
+      for (const [key, filename] of Object.entries(data)) {
+        CASILLAS_IMG[key] = '/media/casillas/' + filename;
+      }
+      // Repintar el cartón si el socket lo había generado entes
+      if (estado.carton && estado.carton.length > 0) {
+        renderizarCarton();
+      }
+    })
+    .catch(err => console.error('Error cargando casillas.json:', err));
 
 // monta el cartón en el DOM
 function renderizarCarton() {

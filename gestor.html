@@ -784,6 +784,86 @@
     }
   }
 
+  function generarYDescargarImagenCarton(jugador, tipoPremio) {
+    if (!jugador || !jugador.carton) return;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 1000;
+    canvas.height = 1000;
+    
+    // Fondo oscuro
+    ctx.fillStyle = '#1e1e24';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Títulos
+    ctx.fillStyle = tipoPremio === 'Bingo' ? '#4caf50' : '#ff9800';
+    ctx.font = 'bold 60px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('¡' + tipoPremio.toUpperCase() + '!', 500, 80);
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 40px sans-serif';
+    ctx.fillText(jugador.nombre + (jugador.twitch ? ' (@' + jugador.twitch + ')' : ''), 500, 140);
+    
+    const cellSize = 160;
+    const startX = 100 + (800 - (cellSize*5))/2;
+    const startY = 180;
+    const cantadasSet = new Set(estadoLocal.cantadas || []);
+    const marcadasSet = new Set(jugador.marcadas || []);
+    
+    // Auto-calculo para saltos de línea en celdas
+    function wrapText(context, text, x, y, maxWidth, lineHeight) {
+      const words = text.split(' ');
+      let lines = [];
+      let line = '';
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        if (context.measureText(testLine).width > maxWidth && n > 0) {
+          lines.push(line.trim());
+          line = words[n] + ' ';
+        } else {
+          line = testLine;
+        }
+      }
+      lines.push(line.trim());
+      let currentY = y - ((lines.length - 1) * lineHeight) / 2;
+      for (let l of lines) {
+         context.fillText(l, x, currentY);
+         currentY += lineHeight;
+      }
+    }
+    
+    // Pinta la 5x5
+    for (let f = 0; f < 5; f++) {
+      for (let c = 0; c < 5; c++) {
+        const frase = jugador.carton[f][c];
+        const x = startX + c * cellSize;
+        const y = startY + f * cellSize;
+        const esCantada = cantadasSet.has(frase);
+        const esMarcada = marcadasSet.has(frase);
+        
+        ctx.fillStyle = esCantada ? '#4caf50' : '#2b2b36';
+        ctx.fillRect(x, y, cellSize - 5, cellSize - 5);
+        ctx.lineWidth = esMarcada ? 4 : 1;
+        ctx.strokeStyle = esMarcada ? '#ffeb3b' : '#111';
+        ctx.strokeRect(x, y, cellSize - 5, cellSize - 5);
+        
+        ctx.fillStyle = esCantada ? '#fff' : '#ccc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '14px sans-serif';
+        wrapText(ctx, frase, x + (cellSize-5)/2, y + (cellSize-5)/2, cellSize - 15, 18);
+      }
+    }
+    
+    // Lanza descarga automática
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `${tipoPremio}_Ganador_${jugador.nombre}.png`.replace(/\s+/g, '_');
+    link.href = dataUrl;
+    link.click();
+  }
+
   function mostrarOverlay(tipo, ganador, twitch) {
     const etiqueta = twitch ? `${ganador} <small style="opacity:.7">@${twitch}</small>` : ganador;
     if (tipo === 'bingo') {
@@ -1124,8 +1204,9 @@
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
     if (jug) {
       jug.cantadoLinea = true;
-      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
-    }
+        renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+        setTimeout(() => generarYDescargarImagenCarton(jug, 'Linea'), 500);
+      }
     actualizarGanadoresHeader();
   });
 
@@ -1137,8 +1218,9 @@
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
     if (jug) {
       jug.cantadoBingo = true;
-      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
-    }
+        renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+        setTimeout(() => generarYDescargarImagenCarton(jug, 'Bingo'), 500);
+      }
     actualizarGanadoresHeader();
     // No terminamos: el gestor elige desde el overlay
   });
