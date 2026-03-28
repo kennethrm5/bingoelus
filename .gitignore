@@ -17,6 +17,5 @@ config.json
 
 # Archivos de empaquetado y tests
 *.exe
-!Bingoelus Setup *.exe
 resultados-*
 
