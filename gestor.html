@@ -1250,9 +1250,9 @@
 
   btnIniciar.addEventListener('click', () => {
     const raw = inputFrases.value;
-    // Separar por comas O saltos de línea, limpiar espacios
+    // Separar por saltos de línea (ignorando comas), limpiar espacios
     const frases = raw
-      .split(/[\n,]+/)
+      .split(/\r?\n/)
       .map(f => f.trim())
       .filter(f => f.length > 0);
 
