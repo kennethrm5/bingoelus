@@ -43,6 +43,8 @@ const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
 const estado = {
   frases: [],
   cantadas: [],
+  verificadas: [],
+  olvidadas: [],
   jugadores: {},    // socketId → datos del jugador
   tokens: {},       // twitchLogin → cartón persistente entre sesiones
   ips: {},          // ip → twitchLogin (para evitar dos cuentas desde la misma red)
@@ -460,6 +462,14 @@ expressApp.get('/auth/twitch/logout', (req, res) => {
     res.sendFile(require('path').join(__dirname, 'casillas.json'), err => { if(err) res.status(404).json({}); });
   });
 
+expressApp.get(['/moderador', '/moderador.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'moderador.html'));
+});
+
+expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 expressApp.get('/', (req, res, next) => {
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
@@ -500,6 +510,8 @@ nsGestor.on('connection', (socket) => {
   socket.emit('estado:actual', {
     frases:       estado.frases,
     cantadas:     estado.cantadas,
+    verificadas:  estado.verificadas,
+    olvidadas:    estado.olvidadas,
     jugadores:    resumenJugadores().jugadores || [],
     lineaGanada:  estado.lineaGanada,
     bingoGanado:  estado.bingoGanado,
@@ -516,6 +528,8 @@ nsGestor.on('connection', (socket) => {
     }
     estado.frases                   = frases.map(f => f.trim()).filter(Boolean);
     estado.cantadas                 = [];
+    estado.verificadas              = [];
+    estado.olvidadas                = [];
     estado.jugadores                = {};
     estado.tokens                   = {};
     estado.ips                      = {};
@@ -528,7 +542,7 @@ nsGestor.on('connection', (socket) => {
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     socket.emit('estado:actual', {
-      frases: estado.frases, cantadas: [], jugadores: [],
+      frases: estado.frases, cantadas: [], verificadas: [], olvidadas: [], jugadores: [],
       lineaGanada: false, bingoGanado: false, partidaActiva: true,
       reclamacionesHabilitadas: false, umbralReclamo: 0,
     });
@@ -541,9 +555,73 @@ nsGestor.on('connection', (socket) => {
     Object.values(estado.jugadores).forEach(j => {
       j.marcadas = (j.marcadas || []).filter(m => m !== frase);
     });
-    console.log(`[Servidor] Frase descantada: "${frase}"`);
+
+    // Recalcular ganadores de línea y bingo y permitir volver a reclamar si ya no es ganador
+    let algunLinea = false;
+    let algunBingo = false;
+    Object.values(estado.jugadores).forEach(j => {
+      // Línea
+      if (j.cantadoLinea && !validarLinea(j.carton, estado.cantadas, j.marcadas || [])) {
+        j.cantadoLinea = false;
+        // Permitir volver a reclamar línea
+        if (typeof j.huelgas !== 'undefined') j.huelgas = 0;
+      }
+      if (validarLinea(j.carton, estado.cantadas, j.marcadas || [])) {
+        algunLinea = true;
+      }
+      // Bingo
+      if (j.cantadoBingo && !validarBingo(j.carton, estado.cantadas, j.marcadas || [], estado.umbralReclamo)) {
+        j.cantadoBingo = false;
+        // Permitir volver a reclamar bingo
+        if (typeof j.huelgas !== 'undefined') j.huelgas = 0;
+      }
+      if (validarBingo(j.carton, estado.cantadas, j.marcadas || [], estado.umbralReclamo)) {
+        algunBingo = true;
+      }
+    });
+    // Si ya no hay ningún ganador de línea/bingo, resetear flags globales
+    const antesLinea = estado.lineaGanada;
+    const antesBingo = estado.bingoGanado;
+    const antesActiva = estado.partidaActiva;
+    estado.lineaGanada = algunLinea;
+    estado.bingoGanado = algunBingo;
+
+    // Si ya no hay ganador de línea, permitir que vuelva a haber ganador
+    if (!estado.lineaGanada) {
+      // Si la partida estaba activa, habilitar reclamaciones
+      if (estado.partidaActiva) {
+        estado.reclamacionesHabilitadas = true;
+        nsJugador.emit('partida:reclamaciones-habilitadas');
+        nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
+      }
+    }
+    // Si ya no hay ganador de bingo, reactivar partida si antes se terminó solo por ese bingo
+    if (antesBingo && !estado.bingoGanado) {
+      // Si la partida estaba terminada y no hay ningún ganador de bingo, reactivar
+      if (!estado.partidaActiva) {
+        estado.partidaActiva = true;
+        estado.reclamacionesHabilitadas = true;
+        nsJugador.emit('partida:reclamaciones-habilitadas');
+        nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
+      }
+    }
+
+    console.log(`[Servidor] Frase descantada: "${frase}". Recalculados ganadores.`);
     nsJugador.emit('partida:frase-descantada', { frase, cantadas: estado.cantadas });
     nsGestor.emit('partida:frase-descantada',  { frase, cantadas: estado.cantadas });
+    // Enviar estado actualizado a todos los moderadores
+    nsGestor.emit('estado:actual', {
+      frases: estado.frases,
+      cantadas: estado.cantadas,
+      verificadas: estado.verificadas,
+      olvidadas: estado.olvidadas,
+      jugadores: Object.values(estado.jugadores),
+      lineaGanada: estado.lineaGanada,
+      bingoGanado: estado.bingoGanado,
+      partidaActiva: estado.partidaActiva,
+      reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
+      umbralReclamo: estado.umbralReclamo
+    });
   });
 
   socket.on('gestor:cantar-frase', (payload) => {
@@ -557,14 +635,48 @@ nsGestor.on('connection', (socket) => {
     nsGestor.emit('partida:frase-cantada',  { frase, cantadas: estado.cantadas });
   });
 
+  socket.on('gestor:toggle-verificacion', (payload) => {
+    const { frase, estado: nuevoEstadoStr } = payload || {};
+    if (!frase || !estado.frases.includes(frase)) return;
+    
+    // estado puede ser: 'verificada', 'olvidada', 'nula'
+    estado.verificadas = estado.verificadas.filter(f => f !== frase);
+
+    if (nuevoEstadoStr === 'verificada') {
+      estado.verificadas.push(frase);
+    }
+
+    nsGestor.emit('partida:verificaciones-actualizadas', {
+      verificadas: estado.verificadas,
+      olvidadas: estado.olvidadas
+    });
+  });
+
+  socket.on('gestor:sync-excel', () => {
+    // Enviar el estado a TODOS los moderadores conectados (no solo al que pulsa)
+    nsGestor.emit('estado:actual', {
+      frases: estado.frases,
+      cantadas: estado.cantadas,
+      verificadas: estado.verificadas,
+      olvidadas: estado.olvidadas,
+      jugadores: Object.values(estado.jugadores),
+      lineaGanada: estado.lineaGanada,
+      bingoGanado: estado.bingoGanado,
+      partidaActiva: estado.partidaActiva,
+      reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
+      umbralReclamo: estado.umbralReclamo
+    });
+  });
+
   socket.on('gestor:resetear', () => {
-    estado.cantadas = []; estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
+    estado.cantadas = []; estado.verificadas = []; estado.olvidadas = [];
+    estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
     estado.lineaGanada = false; estado.bingoGanado = false; estado.partidaActiva = false;
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     socket.emit('estado:actual', {
-      frases: [], cantadas: [], jugadores: [],
+      frases: [], cantadas: [], verificadas: [], olvidadas: [], jugadores: [],
       lineaGanada: false, bingoGanado: false, partidaActiva: false,
       reclamacionesHabilitadas: false, umbralReclamo: 0,
     });
@@ -618,6 +730,39 @@ nsGestor.on('connection', (socket) => {
     nsGestor.emit('partida:juego-terminado',  { ganadores });
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
     guardarResultados(ganadoresLinea, ganadoresBingo);
+  });
+
+  socket.on('gestor:guardar-carton', (payload) => {
+    if (!payload || !payload.nombre || !payload.dataUrl) return;
+    try {
+      const base64Data = payload.dataUrl.replace(/^data:image\/png;base64,/, '');
+      const nombreLimpio = payload.nombre.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      
+      // Fecha en formato YYYY-MM-DD_HHMM
+      const ahora = new Date();
+      const fechaISO = ahora.toISOString();
+      const fechaStr = fechaISO.split('T')[0];
+      const horaStr = fechaISO.split('T')[1].replace(/[:.]/g, '').substring(0, 4);
+      
+      const fileName = `${nombreLimpio}_${fechaStr}_${horaStr}_${payload.tipoPremio}.png`;
+      const dirPath = '/opt/bingoelus/ganadores';
+      
+      const fs = require('fs');
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      
+      const filePath = path.join(dirPath, fileName);
+      fs.writeFile(filePath, base64Data, 'base64', (err) => {
+        if (err) {
+          console.error('[Servidor] Error guardando cartón ganador:', err);
+        } else {
+          console.log(`[Servidor] Cartón ganador guardado en: ${filePath}`);
+        }
+      });
+    } catch (e) {
+      console.error('[Servidor] Error al procesar imagen de cartón:', e);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -744,7 +889,7 @@ nsJugador.on('connection', (socket) => {
 
 // Guarda el num de huelgas global, no solo temporales
 const STRIKES_MAX = 3;
-const STRIKE_COOLDOWN_SEG = 20;
+const STRIKE_COOLDOWN_SEG = 30;
 
 function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
@@ -772,15 +917,18 @@ function frasePendienteParaBingo(jugador) {
   return noCantada || 'Alguna casilla';
 }
 
-function registrarFalloReclamo(jugador, socket, frasePendiente) {
+function registrarFalloReclamo(jugador, socket) {
   jugador.huelgas = (jugador.huelgas || 0) + 1;
-  const errorMsg = `"${frasePendiente}" no ha salido, espabila!`;
+  const errorMsg = `¡No tienes todo marcado correctamente espabila!`;
   
-  if (jugador.huelgas >= STRIKES_MAX) {
+  const limiteActual = (jugador.penalizadoPreviamente) ? 1 : STRIKES_MAX;
+  
+  if (jugador.huelgas >= limiteActual) {
+    jugador.penalizadoPreviamente = true;
     jugador.huelgas = 0;
-    socket.emit('tu:bloqueado', { segs: STRIKE_COOLDOWN_SEG, msg: `Demasiados intentos falsos. Espabila y espera ${STRIKE_COOLDOWN_SEG}s.` });
+    socket.emit('tu:bloqueado', { segs: STRIKE_COOLDOWN_SEG, msg: limiteActual === 1 ? `No tenías las marcadas correctas. Repite penalización y espera ${STRIKE_COOLDOWN_SEG}s.` : `Demasiados intentos falsos. Espabila y espera ${STRIKE_COOLDOWN_SEG}s.` });
   } else {
-    socket.emit('partida:error', { msg: `${errorMsg} (${jugador.huelgas}/${STRIKES_MAX})` });
+    socket.emit('partida:error', { msg: `${errorMsg} (${jugador.huelgas}/${limiteActual})` });
   }
 }
 
@@ -796,13 +944,15 @@ function registrarFalloReclamo(jugador, socket, frasePendiente) {
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
     
     if (!estado.reclamacionesHabilitadas) { socket.emit('partida:error', { msg: 'El gestor aún no ha habilitado las reclamaciones.' }); return; }
-    if (estado.lineaGanada) { socket.emit('partida:error', { msg: 'La línea ya fue cantada por otro jugador.' }); return; }
+    // Permitir reclamar línea si ningún jugador tiene cantadoLinea=true
+    const hayGanadorLinea = Object.values(estado.jugadores).some(j => j.cantadoLinea);
+    if (hayGanadorLinea) { socket.emit('partida:error', { msg: 'La línea ya fue cantada por otro jugador.' }); return; }
     if (jugador.cantadoLinea) { socket.emit('partida:error', { msg: 'Ya reclamaste una línea en esta partida.' }); return; }
     
     if (!validarLinea(jugador.carton, estado.cantadas, jugador.marcadas || [])) {
-      const frase = frasePendienteParaLinea(jugador);
-      registrarFalloReclamo(jugador, socket, frase);
-      console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE. Le falta/falso: ${frase}`);
+      const fraseFaltante = frasePendienteParaLinea(jugador);
+      registrarFalloReclamo(jugador, socket);
+      console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
       return;
     }
     
@@ -834,11 +984,10 @@ function registrarFalloReclamo(jugador, socket, frasePendiente) {
     if (estado.bingoGanado) { socket.emit('partida:error', { msg: 'El bingo ya fue cantado por otro jugador.' }); return; }
     if (jugador.cantadoBingo) { socket.emit('partida:error', { msg: 'Ya reclamaste bingo en esta partida.' }); return; }
     
-    // Validar bingo solo requiere umbral según lógica previa, pero también las marcadas deben estar ok
     if (!validarBingo(jugador.carton, estado.cantadas, jugador.marcadas || [], estado.umbralReclamo)) {
-      const frase = frasePendienteParaBingo(jugador);
-      registrarFalloReclamo(jugador, socket, frase);
-      console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE. Le falta/falso: ${frase}`);
+      const fraseFaltante = frasePendienteParaBingo(jugador);
+      registrarFalloReclamo(jugador, socket);
+      console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
       return;
     }
     

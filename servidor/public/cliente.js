@@ -37,9 +37,7 @@ let umbralReclamo = 0;
 
 // Sistema de huelgas global: 3 malos claims (Línea o Bingo) → penalización temporal
 const STRIKES_MAX        = 3;
-const STRIKE_COOLDOWN_MS = 20000;
-let huelgasLinea    = 0;
-let huelgasBingo    = 0;
+const STRIKE_COOLDOWN_MS = 30000;
 let penalizadoLinea = false;
 let penalizadoBingo = false;
 let penTimerLinea   = null;
@@ -212,12 +210,10 @@ function actualizarTodasLasCeldas() {
 // resetea huelgas si se habilitan reclamaciones
 function actualizarBotones() {
   if (reclamacionesHabilitadas && !lineaGanadaGlobal && !estado.recibimoLinea) {
-    huelgasLinea = 0;
     penalizadoLinea = false;
     clearTimeout(penTimerLinea);
   }
   if (reclamacionesHabilitadas && !estado.recibimoBingo) {
-    huelgasBingo = 0;
     penalizadoBingo = false;
     clearTimeout(penTimerBingo);
   }
@@ -552,8 +548,6 @@ socket.on('partida:nueva', () => {
   lineaGanadaGlobal        = false;
   reclamacionesHabilitadas = false;
   umbralReclamo            = 0;
-  huelgasLinea = 0;
-  huelgasBingo = 0;
   penalizadoLinea = false;
   penalizadoBingo = false;
   clearTimeout(penTimerLinea);

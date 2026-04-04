@@ -1,12 +1,12 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />
-  <title>Bingoelus — Gestor</title>
+  <title>Bingoelus — Moderador</title>
   <style>
-    /* ── Reset & Variables ─────────────────────────────────── */
+    /* -- Reset & Variables ----------------------------------- */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -35,7 +35,7 @@
       flex-direction: column;
     }
 
-    /* ── Header ────────────────────────────────────────────── */
+    /* -- Header ---------------------------------------------- */
     header {
       background: var(--surface);
       padding: 14px 24px;
@@ -75,11 +75,11 @@
     }
     #btn-copiar:hover { background: var(--accent-h); }
 
-    /* ── Layout principal ──────────────────────────────────── */
+    /* -- Layout principal -- */
     main {
       display: grid;
       grid-template-columns: 340px 1fr;
-      grid-template-rows: auto 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
       gap: 16px;
       padding: 16px;
       flex: 1;
@@ -87,7 +87,7 @@
       overflow: hidden;
     }
 
-    /* ── Panel izquierdo (configuración) ────────── */
+    /* -- Panel izquierdo (configuración) -- */
     #panel-izq {
       display: flex;
       flex-direction: column;
@@ -97,21 +97,18 @@
       overflow-y: auto;
     }
 
-    /* Música: fila 1, columna 2 */
-    #card-musica { grid-column: 2; grid-row: 1; }
+    /* Frases: columna 1, fila 1 */
+    #card-frases { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-    /* Cartones: fila 2, columna 2 */
-    #panel-cartones { grid-column: 2; grid-row: 2; min-height: 0; }
+    /* Log: columna 1, fila 2 */
+    #panel-log { grid-column: 1; grid-row: 2; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    
+    /* Cartones: columna 2, fila 1 */
+    #panel-cartones { grid-column: 2; grid-row: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: transparent; padding: 0; box-shadow: none; } /* Sobrescribe .card predeterminado para este */
 
-    /* Log: fila 3, columna 1 (debajo de config) */
-    #panel-log { grid-column: 1; grid-row: 3; min-height: 0; }
-
-    /* Frases: fila 3, columna 2 */
-    #card-frases { grid-column: 2; grid-row: 3; display: flex; flex-direction: column; overflow: hidden; }
-
-    .card {
-      background: var(--surface);
-      border-radius: var(--radius);
+    /* Tracking (Excel): columna 2, fila 2 */
+    #card-tracking { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .card { background: var(--surface); border-radius: var(--radius);
       padding: 16px;
       box-shadow: var(--shadow);
     }
@@ -189,7 +186,7 @@
       opacity: .85;
     }
 
-    /* ── Panel derecho arriba (jugadores) ──────────────────── */
+    /* -- Panel derecho arriba (jugadores) -------------------- */
     #panel-cartones {
       background: var(--surface);
       border-radius: var(--radius);
@@ -348,7 +345,7 @@
     .badge-linea { background: var(--warn);    color: #000; }
     .badge-bingo { background: var(--success); color: #000; }
 
-    /* ── Log de eventos (lateral izquierdo, fila 3) ─────────── */
+    /* -- Log de eventos (lateral izquierdo, fila 3) ----------- */
     #panel-log {
       background: var(--surface);
       border-radius: var(--radius);
@@ -379,7 +376,7 @@
     .log-item.error  { color: var(--danger); }
     .log-item.info   { color: var(--muted); }
 
-    /* ── Alerta de premio ─────────────────────────────────── */
+    /* -- Alerta de premio ----------------------------------- */
     #overlay-premio {
       display: none;
       position: fixed;
@@ -413,40 +410,12 @@
       to   { text-shadow: 0 0 60px currentColor, 0 0 120px currentColor; }
     }
 
-    /* ── Scrollbars personalizados ────────────────────────── */
+    /* -- Scrollbars personalizados -------------------------- */
     ::-webkit-scrollbar       { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #3d3500; border-radius: 3px; }
 
-    /* ── Tarjeta de música (inline: título + controles en la misma fila) ─ */
-    #card-musica {
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 14px;
-      padding: 10px 16px;
-    }
-    #card-musica h2 { margin: 0; white-space: nowrap; flex-shrink: 0; }
-    #card-musica .controles-musica {
-      display: flex;
-      gap: 6px;
-      flex-wrap: nowrap;
-      align-items: center;
-      margin-top: 0;
-    }
-    #card-musica button {
-      padding: 6px 12px;
-      border: none;
-      border-radius: 6px;
-      background: var(--surface2);
-      color: var(--text);
-      cursor: pointer;
-      font-size: .82rem;
-      border: 1px solid #3d3500;
-      transition: background .15s;
-    }
-    #card-musica button:hover { background: var(--accent); border-color: var(--accent); color: #000; }
-    #lbl-vol { color: var(--muted); font-size: .82rem; min-width: 40px; text-align: center; }
+
     #btn-claxon {
       width: 100%;
       margin-top: 8px;
@@ -462,7 +431,7 @@
     }
     #btn-claxon:hover { background: #b45309; }
 
-    /* ── Overlay de conexión al servidor ──────────────── */
+    /* -- Overlay de conexión al servidor ---------------- */
     #overlay-conexion {
       position: fixed; inset: 0; z-index: 1000;
       background: var(--bg);
@@ -496,65 +465,30 @@
     }
     .connect-card button:hover { background: var(--accent-h); }
 
-    #overlay-musica {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      z-index: 1001;
-      box-shadow: 0 4px 20px rgba(0,0,0,.4);
-    }
-    #overlay-musica button {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 5px 10px;
-      cursor: pointer;
-      font-size: .9rem;
-      transition: background .15s;
-    }
-    #overlay-musica button:hover { background: var(--accent); }
   </style>
 </head>
 <body>
 
-<!-- ═══════════════ OVERLAY CONEXIÓN ═══════════════ -->
+<!-- --------------- OVERLAY CONEXIÓN --------------- -->
 <div id="overlay-conexion">
   <div class="connect-card">
-    <h2>🎱 Bingoelus — Gestor</h2>
-    <p>Introduce la URL del servidor y el token para conectar.</p>
-    <input id="input-srv-url" type="url" placeholder="https://bingoelus.online" autocomplete="off" />
-    <input id="input-gestor-token" type="password" placeholder="Token del gestor" autocomplete="off"
+    <h2 style="color:var(--accent)">🛡️ Bingoelus — Moderador</h2>
+    <p>Introduce tu token de moderador para autentificarte en el panel.</p>
+    <input id="input-srv-url" type="hidden" value="http://localhost" />
+    <input id="input-gestor-token" type="password" placeholder="Token del moderador" autocomplete="off"
       onkeydown="if(event.key==='Enter')conectar()" />
     <button onclick="conectar()">Conectar</button>
     <p id="connect-error" style="color:var(--danger);min-height:1.2em;"></p>
   </div>
-  <!-- Control de música en el overlay para que Joelus no se quede sordo -->
-  <div id="overlay-musica">
-    <span style="font-size:.85rem;opacity:.7;">🎵 Música</span>
-    <button id="ovl-btn-play">▶</button>
-    <button id="ovl-btn-pause">⏸</button>
-    <button id="ovl-btn-vol-down">🔉</button>
-    <span id="ovl-lbl-vol">50%</span>
-    <button id="ovl-btn-vol-up">🔊</button>
-  </div>
 </div>
 
-<!-- ═══════════════ HEADER ═══════════════ -->
+<!-- --------------- HEADER --------------- -->
 <header>
-  <h1>🎱 Bingoelus — Panel del Gestor</h1>
+  <h1>🛡️ Bingoelus — Panel de Moderación</h1>
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
     <div id="url-publica">
       <div class="info-bloque">
-        <span class="etiq">🌐 URL jugadores:</span>
+        <span class="etiq">🔗 URL jugadores:</span>
         <span class="valor" id="txt-url">—</span>
         <button class="btn-mini" id="btn-copiar">Copiar</button>
       </div>
@@ -562,10 +496,10 @@
   </div>
 </header>
 
-<!-- ═══════════════ MAIN ═══════════════ -->
+<!-- --------------- MAIN --------------- -->
 <main>
-  <!-- ── Panel izquierdo (configuración) ── -->
-  <aside id="panel-izq">
+  <!-- -- Panel izquierdo (configuración) -- -->
+  <aside id="panel-izq" style="display: none;">
 
     <!-- Configurar partida -->
     <div class="card" id="card-config">
@@ -574,8 +508,8 @@
         id="input-frases"
         placeholder="Escribe las frases separadas por comas o saltos de línea.&#10;Mínimo 25 frases para un cartón 5×5.&#10;&#10;Ejemplo:&#10;Le llegó el cuento,&#10;Tenía el pelo negro,&#10;..."
       ></textarea>
-      <button class="primary" id="btn-iniciar">▶ Iniciar Partida</button>
-      <button class="primary danger" id="btn-resetear" style="margin-top:6px">🔄 Resetear Todo</button>
+      <button class="primary" id="btn-iniciar">Iniciar Partida</button>
+      <button class="primary danger" id="btn-resetear" style="margin-top:6px">🗑️ Resetear Todo</button>
       <button id="btn-reclamaciones" class="off">🔒 Habilitar Reclamaciones (desactivado)</button>
       <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <label for="input-umbral" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">Casillas restantes máx. para ¡Bingo!:</label>
@@ -583,25 +517,12 @@
           style="width:58px;background:var(--bg);border:1px solid #3d3500;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
         <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#000;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
       </div>
-      <button id="btn-claxon">📯 Tocar Claxon</button>
+      <button id="btn-claxon">📢 Tocar Claxon</button>
     </div>
 
   </aside>
 
-  <!-- ── Música de fondo (encima de los cartones) ── -->
-  <div class="card" id="card-musica">
-    <h2>🎵 Música de Fondo</h2>
-    <div id="yt-player"></div>
-    <div class="controles-musica">
-      <button id="btn-musica-play">▶ Reanudar</button>
-      <button id="btn-musica-pause">⏸ Pausar</button>
-      <button id="btn-vol-down">🔉</button>
-      <span id="lbl-vol">50%</span>
-      <button id="btn-vol-up">🔊</button>
-    </div>
-  </div>
-
-  <!-- ── Jugadores (acordeón) ── -->
+  <!-- -- Jugadores (acordeón) -- -->
   <section id="panel-cartones">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
       <h2 style="margin-bottom: 0;">👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
@@ -612,73 +533,68 @@
     </div>
   </section>
 
-  <!-- ── Log de eventos ── -->
+  <!-- -- Log de eventos -- -->
   <section id="panel-log">
     <h2>📋 Registro de Eventos</h2>
     <div id="log-eventos"></div>
   </section>
 
-  <!-- ── Lista de frases cantables (ancho completo, debajo) ── -->
+  <!-- -- Lista de frases cantables -- -->
   <div class="card" id="card-frases">
-    <h2>📣 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
+    <h2>🎯 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
     <div id="lista-frases">
       <p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>
     </div>
   </div>
 
+  <!-- -- Seguimiento de frases (Excel) -- -->
+  <div class="card" id="card-tracking">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="margin:0;">📊 Seguimiento de frases (Verificación)</h2>
+      <button id="btn-sync-excel" class="primary" style="max-width:180px;min-width:120px;display:inline-block;">🔄 Sincronizar Excel</button>
+    </div>
+    <div id="lista-tracking" style="display:flex;flex-direction:column;gap:0;flex:1;overflow-y:auto;">
+    </div>
+  </div>
+
 </main>
 
-<!-- ═══════════════ OVERLAY PREMIO ═══════════════ -->
-<div id="overlay-premio">
-  <h2 id="overlay-tipo" style="color: var(--warn)">🎉 ¡LÍNEA!</h2>
-  <p id="overlay-ganador">Ha ganado: <strong></strong></p>
-  <div id="overlay-btns-linea" style="display:none;flex-direction:column;align-items:center;gap:10px;">
-    <button onclick="continuarBingo()" style="background:var(--success);color:#000;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🏆 Continuar para el Bingo</button>
-    <button onclick="cerrarOverlay()" style="background:var(--danger);color:#fff;padding:10px 24px;font-size:.9rem;border:none;border-radius:8px;cursor:pointer">Terminar aquí</button>
+<!-- --------------- OVERLAY PREMIO --------------- -->
+  <div id="overlay-premio">
+    <h2 id="overlay-tipo" style="color: var(--warn)">🎉 ¡LÍNEA!</h2>
+    <p id="overlay-ganador">Ha ganado: <strong></strong></p>
+    <button id="btn-cerrar-overlay" style="margin-top:24px;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;background:var(--accent);color:#000;cursor:pointer;font-weight:700">Cerrar</button>
   </div>
-  <div id="overlay-btns-bingo" style="display:none;flex-direction:column;align-items:center;gap:10px;">
-    <button onclick="terminarPartida()" style="background:var(--danger);color:#fff;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🔚 Terminar partida aquí</button>
-    <button onclick="continuarBingo()" style="background:var(--accent);color:#fff;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;cursor:pointer;font-weight:700">🏆 Permitir más ganadores de Bingo</button>
-  </div>
-</div>
 
 <!-- YouTube IFrame API -->
-<script src="https://www.youtube.com/iframe_api"></script>
 <!-- Socket.io desde CDN (v4.7.x, compatible con el servidor) -->
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-  // ══════════════════════════════════════════════════════
+  // ------------------------------------------------------
   // gestor.js — Lógica de la interfaz del gestor
   // Conecta al namespace /gestor del servidor Socket.io
-  // ══════════════════════════════════════════════════════
+  // ------------------------------------------------------
 
   'use strict';
 
-  // ── Conexión diferida — el gestor introduce URL y token ──────
+  // -- Conexión diferida — el gestor introduce URL y token ------
   let socket = null;
 
   // Pre-rellenar con la última URL usada
-  (function() {
-    const guardada = localStorage.getItem('bingoelus_srv_url') || '';
-    if (guardada) {
-      const el = document.getElementById('input-srv-url');
-      if (el) el.value = guardada;
-    }
-  })();
+  
 
   function conectar() {
-    const url   = (document.getElementById('input-srv-url').value   || '').trim().replace(/\/$/, '');
+    const url = window.location.origin;
     const token = (document.getElementById('input-gestor-token').value || '').trim();
     const errEl = document.getElementById('connect-error');
-    if (!url || !token) { errEl.textContent = 'Completa los dos campos.'; return; }
+    if (!token) { errEl.textContent = 'Completa el token de moderador.'; return; }
     errEl.textContent = 'Conectando…';
-    localStorage.setItem('bingoelus_srv_url', url);
-    socket = io(`${url}/gestor`, { transports: ['websocket', 'polling'], auth: { token } });
+    socket = io(url + '/gestor', { transports: ['websocket', 'polling'], auth: { token } });
     registrarEventos();
   }
   window.conectar = conectar;
 
-  // ── Estado local (mirror del servidor para renderizar) ─
+  // -- Estado local (mirror del servidor para renderizar) -
   let estadoLocal = {
     frases:                   [],
     cantadas:                 [],
@@ -690,7 +606,7 @@
 
   let reclamacionesActivas = false;
 
-  // ── Elementos DOM ─────────────────────────────────────
+  // -- Elementos DOM -------------------------------------
   const txtUrl          = document.getElementById('txt-url');
   const btnCopiar       = document.getElementById('btn-copiar');
   const inputFrases     = document.getElementById('input-frases');
@@ -709,61 +625,7 @@
   // Rastrea qué socketId tiene el acordeón abierto
   let jugadorAbierto = null;
 
-  // ── YouTube IFrame Player ──────────────────────────────────
-  let ytPlayer = null;
-  let ytVolumen = 50;
-
-  // Llamado automáticamente por el API de YouTube cuando carga
-  window.onYouTubeIframeAPIReady = function () {
-    ytPlayer = new YT.Player('yt-player', {
-      width: '1',
-      height: '1',
-      videoId: 'PaFHwTjy1yE',
-      playerVars: {
-        autoplay: 1,
-        mute: 1,          // empieza muteado para saltarse la política de autoplay
-        controls: 0,
-        loop: 0,
-        rel: 0,
-      },
-      events: {
-        onReady: function (e) {
-          e.target.setVolume(ytVolumen);
-          e.target.unMute();
-          document.getElementById('lbl-vol').textContent = ytVolumen + '%';
-        },
-      },
-    });
-  };
-
-  function ytSetVol(v) {
-    ytVolumen = Math.max(0, Math.min(100, v));
-    const txt = ytVolumen + '%';
-    document.getElementById('lbl-vol').textContent     = txt;
-    document.getElementById('ovl-lbl-vol').textContent = txt;
-    if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(ytVolumen);
-  }
-
-  document.getElementById('btn-musica-play').addEventListener('click', () => {
-    if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
-  });
-  document.getElementById('btn-musica-pause').addEventListener('click', () => {
-    if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-  });
-  document.getElementById('btn-vol-up').addEventListener('click', () => ytSetVol(ytVolumen + 10));
-  document.getElementById('btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
-
-  // Controles del overlay (misma lógica, sincronizan con los del panel principal)
-  document.getElementById('ovl-btn-play').addEventListener('click', () => {
-    if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
-  });
-  document.getElementById('ovl-btn-pause').addEventListener('click', () => {
-    if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-  });
-  document.getElementById('ovl-btn-vol-up').addEventListener('click',   () => ytSetVol(ytVolumen + 10));
-  document.getElementById('ovl-btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
-
-  // ── Claxon mp3 ─────────────────────────────────────────────
+  // -- Claxon mp3 ---------------------------------------------
   const audioClaxon = new Audio('/media/claxon.mp3');
 
   function reproducirClaxon() {
@@ -773,7 +635,7 @@
 
   document.getElementById('btn-claxon').addEventListener('click', () => reproducirClaxon());
 
-  // ── Helpers de UI ─────────────────────────────────────
+  // -- Helpers de UI -------------------------------------
 
   function agregarLog(msg, tipo = 'info') {
     const item = document.createElement('div');
@@ -875,40 +737,28 @@
   }
 
   function mostrarOverlay(tipo, ganador, twitch) {
-    const etiqueta = twitch ? `${ganador} <small style="opacity:.7">@${twitch}</small>` : ganador;
+    const etiqueta = twitch ? `${ganador} <small style=\"opacity:.7\">@${twitch}</small>` : ganador;
     if (tipo === 'bingo') {
       overlayTipo.textContent    = '🏆 ¡BINGO!';
       overlayTipo.style.color    = 'var(--success)';
-      document.getElementById('overlay-btns-linea').style.display = 'none';
-      document.getElementById('overlay-btns-bingo').style.display = 'block';
     } else {
       overlayTipo.textContent    = '🎉 ¡LÍNEA!';
       overlayTipo.style.color    = 'var(--warn)';
-      document.getElementById('overlay-btns-linea').style.display = 'flex';
-      document.getElementById('overlay-btns-bingo').style.display = 'none';
     }
     overlayGanador.innerHTML = `Ha ganado: <strong>${etiqueta}</strong>`;
     overlayPremio.classList.add('visible');
   }
 
-  function cerrarOverlay() {
-    overlayPremio.classList.remove('visible');
-  }
-  window.cerrarOverlay = cerrarOverlay;
 
-  function continuarBingo() {
-    cerrarOverlay();
-    socket.emit('gestor:continuar-bingo');
-    agregarLog('El gestor permite más ganadores de Bingo.', 'ok');
-  }
-  window.continuarBingo = continuarBingo;
-
-  function terminarPartida() {
-    cerrarOverlay();
-    socket.emit('gestor:terminar-partida');
-    agregarLog('El gestor ha terminado la partida.', 'ok');
-  }
-  window.terminarPartida = terminarPartida;
+  // Botón para cerrar el overlay manualmente
+  document.addEventListener('DOMContentLoaded', function() {
+    const btnCerrar = document.getElementById('btn-cerrar-overlay');
+    if (btnCerrar) {
+      btnCerrar.addEventListener('click', function() {
+        overlayPremio.classList.remove('visible');
+      });
+    }
+  });
 
   // Actualiza el botón de reclamaciones según el estado del servidor
   function actualizarBotonReclamaciones(activas) {
@@ -923,7 +773,7 @@
     }
   }
 
-  // ── Renderizar lista de frases (panel izquierdo) ───────
+  // -- Renderizar lista de frases (panel izquierdo) -------
   function renderizarFrases(frases, cantadas) {
     listaFrases.innerHTML = '';
     const cantadasSet = new Set(cantadas);
@@ -950,7 +800,7 @@
       btn.textContent = frase;
       btn.disabled    = cantadasSet.has(frase);
       btn.style.flex  = '1';
-
+      
       if (!btn.disabled) {
         btn.addEventListener('click', () => {
           socket.emit('gestor:cantar-frase', { frase });
@@ -961,7 +811,7 @@
 
       if (cantadasSet.has(frase)) {
         const btnD = document.createElement('button');
-        btnD.textContent = '↩';
+        btnD.textContent = '✖';
         btnD.title = `Desmarcar: ${frase}`;
         btnD.style.cssText = 'padding:6px 9px;border:1px solid var(--danger);border-radius:7px;background:transparent;color:var(--danger);cursor:pointer;font-size:.8rem;flex-shrink:0;line-height:1;transition:background .15s;';
         btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(239,68,68,.15)'; });
@@ -976,7 +826,107 @@
     });
   }
 
-  // ── Renderizar lista de jugadores (acordeón) ──────────
+  // -- Renderizar Seguimiento de Frases (Panel Excel) --
+  function renderizarSeguimiento(frases, cantadas) {
+    const listaTracking = document.getElementById('lista-tracking');
+    if (!listaTracking) return;
+    listaTracking.innerHTML = '';
+    
+    // Si no hay frases, mostrar mensaje
+    if (!frases || frases.length === 0) {
+      listaTracking.innerHTML = '<p style="color:var(--muted);font-size:.82rem;padding:10px;">Esperando a que inicie la partida...</p>';
+      return;
+    }
+
+    const verificadasSet = new Set(estadoLocal.verificadas || []);
+    const olvidadasSet   = new Set(estadoLocal.olvidadas || []);
+
+    // Crear una "tabla" flex
+    // Encabezado
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;border-bottom:2px solid var(--border);padding:6px 10px;font-weight:600;font-size:0.85rem;background:var(--surface2);position:sticky;top:0;z-index:2;';
+    
+    const thText = document.createElement('div');
+    thText.textContent = 'Casilla';
+    thText.style.flex = '1';
+    
+    const thEstado = document.createElement('div');
+    thEstado.textContent = 'Estado';
+    thEstado.style.width = '140px';
+    thEstado.style.textAlign = 'center';
+    
+    header.appendChild(thText);
+    header.appendChild(thEstado);
+    listaTracking.appendChild(header);
+
+    // Ordenar frases ignorando comillas y mayúsculas/minúsculas
+    const frasesOrdenadas = [...frases].sort((a, b) => {
+      const clean = s => s.replace(/^['"“”‘’`´]+|['"“”‘’`´]+$/g, '').toLowerCase();
+      return clean(a).localeCompare(clean(b), 'es', { sensitivity: 'base' });
+    });
+
+    frasesOrdenadas.forEach((frase, idx) => {
+      const row = document.createElement('div');
+      // Filas alternas
+      row.style.cssText = `display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--surface2);${idx % 2 === 0 ? 'background:rgba(255,255,255,0.02);' : ''}`;
+      
+      const colText = document.createElement('div');
+      colText.textContent = frase;
+      colText.style.flex = '1';
+      colText.style.fontSize = '0.85rem';
+      colText.style.paddingRight = '10px';
+      
+      const colEstado = document.createElement('div');
+      colEstado.style.width = '140px';
+      colEstado.style.display = 'flex';
+      colEstado.style.justifyContent = 'center';
+      
+      // Select
+      const select = document.createElement('select');
+        select.setAttribute('data-frase', frase);
+      const optionNull = document.createElement('option');
+      optionNull.value = 'nula';
+      optionNull.textContent = 'Sin Tachar';
+      
+      const optionTachada = document.createElement('option');
+      optionTachada.value = 'verificada';
+      optionTachada.textContent = 'Tachada';
+
+      select.appendChild(optionNull);
+      select.appendChild(optionTachada);
+
+        const actualizarEstilo = (sel) => {
+          if (sel.value === 'verificada') {
+            sel.style.background = '#a8e6cf'; // Verde suave
+            sel.style.color = '#1b5e20';
+            sel.style.border = '1px solid #81c784';
+          } else {
+            sel.style.background = '#ffcc80'; // Naranja/Rojo clarito
+            sel.style.color = '#bf360c';
+            sel.style.border = '1px solid #ffab40';
+          }
+        };
+
+        if (verificadasSet.has(frase)) {
+          select.value = 'verificada';
+        } else {
+          select.value = 'nula';
+        }
+        actualizarEstilo(select);
+
+        select.addEventListener('change', (e) => {
+          actualizarEstilo(e.target);
+          socket.emit('gestor:toggle-verificacion', { frase, estado: e.target.value });
+        });
+
+        colEstado.appendChild(select);
+        row.appendChild(colText);
+        row.appendChild(colEstado);
+        listaTracking.appendChild(row);
+      });
+    }
+
+  // -- Renderizar lista de jugadores (acordeón) ----------
   function renderizarCartones(jugadores, cantadas) {
     const cantadasSet = new Set(cantadas);
     const onlineCount  = jugadores.filter(j => j.online !== false).length;
@@ -1010,7 +960,7 @@
       fila.dataset.id = j.socketId;
       if (j.socketId === anteriorAbierto) fila.classList.add('abierto');
 
-      // ── Cabecera clicable ──────────────────────────────
+      // -- Cabecera clicable ------------------------------
       const cabecera = document.createElement('div');
       cabecera.className = 'jugador-cabecera';
 
@@ -1033,8 +983,7 @@
         twitchEl.className   = 'twitch-tag';
         twitchEl.textContent = `@${j.twitch}`;
         if (j.twitchVerified) {
-          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
-          twitchEl.textContent += ' ✓';
+          twitchEl.title = 'Autenticado con Twitch OAuth';
           twitchEl.classList.add('twitch-verified');
         }
         nombreEl.appendChild(twitchEl);
@@ -1072,14 +1021,14 @@
         // Cerrar todos
         listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
         if (estaAbierto) {
-          jugadorAbierto = null; // Era el mismo → cerrar
+          jugadorAbierto = null; // Era el mismo ? cerrar
         } else {
           fila.classList.add('abierto');
           jugadorAbierto = j.socketId;
         }
       });
 
-      // ── Panel del cartón (collapsable) ────────────────
+      // -- Panel del cartón (collapsable) ----------------
       const panelCarton = document.createElement('div');
       panelCarton.className = 'jugador-carton';
 
@@ -1101,7 +1050,7 @@
           const span = document.createElement('span');
           span.textContent = frase;
           celda.appendChild(span);
-          celda.title       = esMarcada ? `✓ Marcada: ${frase}` : frase;
+          celda.title       = esMarcada ? `? Marcada: ${frase}` : frase;
           grid.appendChild(celda);
         });
       });
@@ -1117,7 +1066,7 @@
     aplicarFiltroJugadores(); // Reaplicar el buscador
   }
 
-  // ── Buscador de Jugadores ──────────────────────────────
+  // -- Buscador de Jugadores ------------------------------
   function aplicarFiltroJugadores() {
     const term = document.getElementById('buscador-jugadores').value.toLowerCase();
     const filas = document.querySelectorAll('.jugador-fila');
@@ -1133,7 +1082,7 @@
 
   document.getElementById('buscador-jugadores').addEventListener('input', aplicarFiltroJugadores);
 
-  // ── Actualizar toda la UI con un estado completo ───────
+  // -- Actualizar toda la UI con un estado completo -------
   function actualizarGanadoresHeader() {
     const ganLinea = estadoLocal.jugadores.filter(j => j.cantadoLinea).map(j =>
       j.twitch ? `${j.nombre} <span style="opacity:.6;font-size:.9em">@${j.twitch}</span>` : j.nombre
@@ -1152,6 +1101,7 @@
   function aplicarEstado(nuevoEstado) {
     estadoLocal = { ...estadoLocal, ...nuevoEstado };
     renderizarFrases(estadoLocal.frases, estadoLocal.cantadas);
+    renderizarSeguimiento(estadoLocal.frases, estadoLocal.cantadas);
     renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
     actualizarGanadoresHeader();
     if (typeof nuevoEstado.reclamacionesHabilitadas === 'boolean') {
@@ -1163,14 +1113,14 @@
     }
   }
 
-  // ═══════════════════════════════════════════════════════
+  // -------------------------------------------------------
   // EVENTOS SOCKET.IO
-  // ═══════════════════════════════════════════════════════
+  // -------------------------------------------------------
 
   function registrarEventos() {
     socket.on('connect', () => {
       document.getElementById('overlay-conexion').style.display = 'none';
-      const url = localStorage.getItem('bingoelus_srv_url') || '';
+      const url = window.location.origin;
       document.getElementById('txt-url').textContent = url;
       agregarLog('Conectado al servidor.', 'ok');
     });
@@ -1189,10 +1139,42 @@
       agregarLog('Estado del servidor sincronizado.', 'info');
     });
 
+    socket.on('partida:verificaciones-actualizadas', ({ verificadas, olvidadas }) => {
+      estadoLocal.verificadas = verificadas;
+      estadoLocal.olvidadas = olvidadas;
+        
+        // Actualizar en caliente los desplegables para no reiniciar el scroll al resto de moderadores
+        const selects = document.querySelectorAll('#lista-tracking select[data-frase]');
+        if (selects.length > 0) {
+          const verificadasSet = new Set(verificadas || []);
+          const olvidadasSet = new Set(olvidadas || []);
+          selects.forEach(select => {
+            const frase = select.getAttribute('data-frase');
+            let nuevoValor = 'nula';
+            if (verificadasSet.has(frase)) nuevoValor = 'verificada';
+
+            
+            if (select.value !== nuevoValor) {
+              select.value = nuevoValor;
+              if (nuevoValor === 'verificada') {
+                select.style.background = '#a8e6cf'; select.style.color = '#1b5e20'; select.style.border = '1px solid #81c784';
+
+              } else {
+                select.style.background = '#ffcc80'; select.style.color = '#bf360c'; select.style.border = '1px solid #ffab40';
+              }
+            }
+          });
+        } else {
+          // Si por alguna razón la lista de seguimiento no estaba generada aún
+          renderizarSeguimiento(estadoLocal.frases, estadoLocal.cantadas);
+        }
+      });
+
     // Frase descantada por el gestor
-  socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
+    socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
     estadoLocal.cantadas = cantadas;
     renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarSeguimiento(estadoLocal.frases, cantadas);
     renderizarCartones(estadoLocal.jugadores, cantadas);
     agregarLog(`Descantada: "${frase}"`, 'warn');
   });
@@ -1209,6 +1191,7 @@
   socket.on('partida:frase-cantada', ({ frase, cantadas }) => {
     estadoLocal.cantadas = cantadas;
     renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarSeguimiento(estadoLocal.frases, cantadas);
     renderizarCartones(estadoLocal.jugadores, cantadas);
     agregarLog(`Cantada: "${frase}"`, 'warn');
   });
@@ -1235,7 +1218,7 @@
       const esCantada = cantadasSet.has(frase);
       const esMarcada = marcadasSet.has(frase);
       celda.className = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
-      celda.title = esMarcada ? `✓ Marcada: ${frase}` : frase;
+      celda.title = esMarcada ? `? Marcada: ${frase}` : frase;
     });
   });
 
@@ -1287,9 +1270,9 @@
     });
   } // fin registrarEventos()
 
-  // ═══════════════════════════════════════════════════════
+  // -------------------------------------------------------
   // ACCIONES DEL GESTOR
-  // ═══════════════════════════════════════════════════════
+  // -------------------------------------------------------
 
   btnIniciar.addEventListener('click', () => {
     const raw = inputFrases.value;
@@ -1339,6 +1322,14 @@
       }).catch(() => alert('URL: ' + url));
     }
   });
+
+  const btnSyncExcel = document.getElementById('btn-sync-excel');
+  if (btnSyncExcel) {
+    btnSyncExcel.addEventListener('click', () => {
+      socket.emit('gestor:sync-excel');
+      agregarLog('Sincronización de Excel forzada para todos los usuarios.', 'info');
+    });
+  }
 
 </script>
 </body>
