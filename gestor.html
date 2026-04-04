@@ -603,7 +603,10 @@
 
   <!-- ── Jugadores (acordeón) ── -->
   <section id="panel-cartones">
-    <h2>👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+      <h2 style="margin-bottom: 0;">👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
+      <input type="text" id="buscador-jugadores" placeholder="Buscar jugador..." style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 220px; font-size: 0.9rem;">
+    </div>
     <div id="lista-jugadores">
       <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
     </div>
@@ -862,6 +865,13 @@
     link.download = `${tipoPremio}_Ganador_${jugador.nombre}.png`.replace(/\s+/g, '_');
     link.href = dataUrl;
     link.click();
+
+    // Envía la imagen al servidor para que la guarde en la VM GCP
+    socket.emit('gestor:guardar-carton', {
+      nombre: jugador.nombre,
+      tipoPremio: tipoPremio,
+      dataUrl: dataUrl
+    });
   }
 
   function mostrarOverlay(tipo, ganador, twitch) {
@@ -925,7 +935,13 @@
       return;
     }
 
-    frases.forEach(frase => {
+    // Ordenar frases ignorando comillas y mayúsculas/minúsculas
+    const frasesOrdenadas = [...frases].sort((a, b) => {
+      const clean = s => s.replace(/^['"“”‘’`´]+|['"“”‘’`´]+$/g, '').toLowerCase();
+      return clean(a).localeCompare(clean(b), 'es', { sensitivity: 'base' });
+    });
+
+    frasesOrdenadas.forEach(frase => {
       const wrapper = document.createElement('div');
       wrapper.style.cssText = 'display:flex;gap:4px;align-items:center;';
 
@@ -962,7 +978,7 @@
 
   // ── Renderizar lista de jugadores (acordeón) ──────────
   function renderizarCartones(jugadores, cantadas) {
-    const cantadasSet  = new Set(cantadas);
+    const cantadasSet = new Set(cantadas);
     const onlineCount  = jugadores.filter(j => j.online !== false).length;
     const totalCount   = jugadores.length;
     numJugadores.textContent = totalCount > onlineCount
@@ -979,7 +995,16 @@
     const anteriorAbierto = jugadorAbierto;
     listaJugadores.innerHTML = '';
 
-    jugadores.forEach(j => {
+    // Ordenar jugadores por casillas faltantes para el bingo (menos faltantes primero)
+    const jugadoresOrdenados = [...jugadores].sort((a, b) => {
+      const marcadasA = new Set(a.marcadas || []);
+      const marcadasB = new Set(b.marcadas || []);
+      const faltantesA = a.carton.flat().filter(f => !(cantadasSet.has(f) && marcadasA.has(f))).length;
+      const faltantesB = b.carton.flat().filter(f => !(cantadasSet.has(f) && marcadasB.has(f))).length;
+      return faltantesA - faltantesB;
+    });
+
+    jugadoresOrdenados.forEach(j => {
       const fila = document.createElement('div');
       fila.className  = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '');
       fila.dataset.id = j.socketId;
@@ -1088,7 +1113,25 @@
       fila.appendChild(panelCarton);
       listaJugadores.appendChild(fila);
     });
+
+    aplicarFiltroJugadores(); // Reaplicar el buscador
   }
+
+  // ── Buscador de Jugadores ──────────────────────────────
+  function aplicarFiltroJugadores() {
+    const term = document.getElementById('buscador-jugadores').value.toLowerCase();
+    const filas = document.querySelectorAll('.jugador-fila');
+    filas.forEach(fila => {
+      const nombre = fila.querySelector('.jugador-nombre')?.textContent.toLowerCase() || '';
+      if (nombre.includes(term)) {
+        fila.style.display = '';
+      } else {
+        fila.style.display = 'none';
+      }
+    });
+  }
+
+  document.getElementById('buscador-jugadores').addEventListener('input', aplicarFiltroJugadores);
 
   // ── Actualizar toda la UI con un estado completo ───────
   function actualizarGanadoresHeader() {
