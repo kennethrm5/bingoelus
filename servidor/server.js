@@ -57,6 +57,10 @@ const estado = {
 
 const rateLimits = {};
 const RATE_LIMIT_MS = 3000;
+const RATE_MARCADAS_MS = 400;
+const STRIKES_MAX = 3;
+const STRIKE_COOLDOWN_SEG = 30;
+const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
 
 // Debounce del broadcast de jugadores al gestor
 // Con muchos jugadores se espera más para agrupar más actualizaciones
@@ -197,21 +201,41 @@ function resumenJugadores() {
   const total  = jugadoresArr.length + offlineArr.length;
   const online = jugadoresArr.length;
 
-  // Ganadores siempre se incluyen (pocos en cualquier caso)
-  const ganadoresLinea = jugadoresArr
-    .filter(j => j.cantadoLinea)
-    .map(j => ({ socketId: j.socketId, nombre: j.nombre, twitch: j.twitch, cantadoLinea: true, cantadoBingo: j.cantadoBingo, online: true }));
-  const ganadoresBingo = jugadoresArr
-    .filter(j => j.cantadoBingo)
-    .map(j => ({ socketId: j.socketId, nombre: j.nombre, twitch: j.twitch, cantadoLinea: j.cantadoLinea, cantadoBingo: true, online: true }));
+  if (online > GESTOR_FULL_THRESHOLD) {
+    // Modo compacto: enviar solo los cartones más cercanos al bingo para no saturar.
+    const cantadasSet = new Set(estado.cantadas);
+    const topJugadores = jugadoresArr
+      .map(j => {
+        const cartonPlano = Array.isArray(j.carton) ? j.carton.flat() : [];
+        const marcadasSet = new Set(j.marcadas || []);
+        const faltantes = cartonPlano.length > 0
+          ? cartonPlano.filter(f => !(cantadasSet.has(f) && marcadasSet.has(f))).length
+          : CARTON_SIZE;
 
-  if (total > GESTOR_FULL_THRESHOLD) {
-    // Modo compacto: el gestor recibe estadísticas + ganadores, no todos los cartones
+        return { j, faltantes };
+      })
+      .sort((a, b) => {
+        if (a.faltantes !== b.faltantes) return a.faltantes - b.faltantes;
+        return (a.j.nombre || '').localeCompare(b.j.nombre || '', 'es', { sensitivity: 'base' });
+      })
+      .slice(0, GESTOR_FULL_THRESHOLD)
+      .map(({ j }) => ({
+        socketId: j.socketId,
+        nombre: j.nombre,
+        twitch: j.twitch || '',
+        twitchVerified: j.twitchVerified || false,
+        carton: j.carton,
+        cantadoLinea: j.cantadoLinea,
+        cantadoBingo: j.cantadoBingo,
+        marcadas: j.marcadas || [],
+        online: true,
+      }));
+
     return {
       modo:           'compacto',
       totalJugadores: total,
       online,
-      ganadores:      [...new Map([...ganadoresLinea, ...ganadoresBingo].map(g => [g.twitch, g])).values()],
+      jugadores:      topJugadores,
     };
   }
 
@@ -241,6 +265,25 @@ function resumenJugadores() {
   }));
 
   return { modo: 'completo', totalJugadores: total, online, jugadores: [...listaOnline, ...listaOffline] };
+}
+
+function construirEstadoGestor() {
+  const resumen = resumenJugadores();
+  return {
+    frases: estado.frases,
+    cantadas: estado.cantadas,
+    verificadas: estado.verificadas,
+    olvidadas: estado.olvidadas,
+    modo: resumen.modo,
+    totalJugadores: resumen.totalJugadores,
+    online: resumen.online,
+    jugadores: resumen.jugadores || [],
+    lineaGanada: estado.lineaGanada,
+    bingoGanado: estado.bingoGanado,
+    partidaActiva: estado.partidaActiva,
+    reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
+    umbralReclamo: estado.umbralReclamo,
+  };
 }
 
 // ─── Express + Socket.io ──────────────────────────────────────
@@ -507,18 +550,7 @@ nsGestor.use((socket, next) => {
 nsGestor.on('connection', (socket) => {
   console.log('[Gestor] Conectado:', socket.id);
 
-  socket.emit('estado:actual', {
-    frases:       estado.frases,
-    cantadas:     estado.cantadas,
-    verificadas:  estado.verificadas,
-    olvidadas:    estado.olvidadas,
-    jugadores:    resumenJugadores().jugadores || [],
-    lineaGanada:  estado.lineaGanada,
-    bingoGanado:  estado.bingoGanado,
-    partidaActiva: estado.partidaActiva,
-    reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
-    umbralReclamo: estado.umbralReclamo,
-  });
+  socket.emit('estado:actual', construirEstadoGestor());
 
   socket.on('gestor:iniciar-partida', (payload) => {
     const { frases } = payload || {};
@@ -541,87 +573,102 @@ nsGestor.on('connection', (socket) => {
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
-    socket.emit('estado:actual', {
-      frases: estado.frases, cantadas: [], verificadas: [], olvidadas: [], jugadores: [],
-      lineaGanada: false, bingoGanado: false, partidaActiva: true,
-      reclamacionesHabilitadas: false, umbralReclamo: 0,
-    });
+    nsGestor.emit('estado:actual', construirEstadoGestor());
   });
 
   socket.on('gestor:desmarcar-frase', (payload) => {
     const { frase } = payload || {};
     if (!frase || !estado.cantadas.includes(frase)) return;
     estado.cantadas = estado.cantadas.filter(f => f !== frase);
+
+    const onlineLogins = new Set(Object.values(estado.jugadores).map(j => j.twitch));
+
     Object.values(estado.jugadores).forEach(j => {
       j.marcadas = (j.marcadas || []).filter(m => m !== frase);
     });
 
-    // Recalcular ganadores de línea y bingo y permitir volver a reclamar si ya no es ganador
-    let algunLinea = false;
-    let algunBingo = false;
+    // Recalcular ganadores reclamados tras descantar.
+    // Importante: solo cuentan quienes ya habían reclamado (cantadoLinea/cantadoBingo),
+    // no quienes "podrían" tenerlo por su cartón.
     Object.values(estado.jugadores).forEach(j => {
+      const tieneLineaValida = validarLinea(j.carton, estado.cantadas, j.marcadas || []);
+      const tieneBingoValido = validarBingo(j.carton, estado.cantadas, j.marcadas || [], estado.umbralReclamo);
+      const fraseEnSuCarton = Array.isArray(j.carton) && j.carton.some(fila => Array.isArray(fila) && fila.includes(frase));
+
       // Línea
-      if (j.cantadoLinea && !validarLinea(j.carton, estado.cantadas, j.marcadas || [])) {
+      if (j.cantadoLinea && (!tieneLineaValida || fraseEnSuCarton)) {
         j.cantadoLinea = false;
         // Permitir volver a reclamar línea
         if (typeof j.huelgas !== 'undefined') j.huelgas = 0;
       }
-      if (validarLinea(j.carton, estado.cantadas, j.marcadas || [])) {
-        algunLinea = true;
-      }
+
       // Bingo
-      if (j.cantadoBingo && !validarBingo(j.carton, estado.cantadas, j.marcadas || [], estado.umbralReclamo)) {
+      if (j.cantadoBingo && (!tieneBingoValido || fraseEnSuCarton)) {
         j.cantadoBingo = false;
         // Permitir volver a reclamar bingo
         if (typeof j.huelgas !== 'undefined') j.huelgas = 0;
       }
-      if (validarBingo(j.carton, estado.cantadas, j.marcadas || [], estado.umbralReclamo)) {
-        algunBingo = true;
+
+      // Mantener sincronizado el estado persistido del jugador online.
+      if (estado.tokens[j.twitch]) {
+        estado.tokens[j.twitch].marcadas = j.marcadas || [];
+        estado.tokens[j.twitch].cantadoLinea = !!j.cantadoLinea;
+        estado.tokens[j.twitch].cantadoBingo = !!j.cantadoBingo;
       }
     });
-    // Si ya no hay ningún ganador de línea/bingo, resetear flags globales
+
+    // También invalidar estados persistidos de jugadores offline.
+    Object.entries(estado.tokens).forEach(([login, datos]) => {
+      if (onlineLogins.has(login)) return;
+
+      datos.marcadas = (datos.marcadas || []).filter(m => m !== frase);
+      const carton = Array.isArray(datos.carton) ? datos.carton : [];
+      const fraseEnSuCarton = carton.some(fila => Array.isArray(fila) && fila.includes(frase));
+
+      if (datos.cantadoLinea && (!validarLinea(carton, estado.cantadas, datos.marcadas || []) || fraseEnSuCarton)) {
+        datos.cantadoLinea = false;
+      }
+      if (datos.cantadoBingo && (!validarBingo(carton, estado.cantadas, datos.marcadas || [], estado.umbralReclamo) || fraseEnSuCarton)) {
+        datos.cantadoBingo = false;
+      }
+    });
+
+    // Recalcular flags globales SOLO desde reclamaciones reales vigentes.
     const antesLinea = estado.lineaGanada;
     const antesBingo = estado.bingoGanado;
-    const antesActiva = estado.partidaActiva;
-    estado.lineaGanada = algunLinea;
-    estado.bingoGanado = algunBingo;
+    const hayLineaOnline = Object.values(estado.jugadores).some(j => j.cantadoLinea);
+    const hayBingoOnline = Object.values(estado.jugadores).some(j => j.cantadoBingo);
+    const hayLineaOffline = Object.entries(estado.tokens).some(([login, datos]) => !onlineLogins.has(login) && !!datos.cantadoLinea);
+    const hayBingoOffline = Object.entries(estado.tokens).some(([login, datos]) => !onlineLogins.has(login) && !!datos.cantadoBingo);
+    estado.lineaGanada = hayLineaOnline || hayLineaOffline;
+    estado.bingoGanado = hayBingoOnline || hayBingoOffline;
 
-    // Si ya no hay ganador de línea, permitir que vuelva a haber ganador
-    if (!estado.lineaGanada) {
-      // Si la partida estaba activa, habilitar reclamaciones
-      if (estado.partidaActiva) {
-        estado.reclamacionesHabilitadas = true;
-        nsJugador.emit('partida:reclamaciones-habilitadas');
-        nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
-      }
+    const lineaInvalidada = antesLinea && !estado.lineaGanada;
+    const bingoInvalidado = antesBingo && !estado.bingoGanado;
+
+    // Si se invalidó el bingo y la partida estaba terminada, se reactiva para continuar.
+    if (bingoInvalidado && !estado.partidaActiva) {
+      estado.partidaActiva = true;
     }
-    // Si ya no hay ganador de bingo, reactivar partida si antes se terminó solo por ese bingo
-    if (antesBingo && !estado.bingoGanado) {
-      // Si la partida estaba terminada y no hay ningún ganador de bingo, reactivar
-      if (!estado.partidaActiva) {
-        estado.partidaActiva = true;
-        estado.reclamacionesHabilitadas = true;
-        nsJugador.emit('partida:reclamaciones-habilitadas');
-        nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
-      }
+
+    // Si se invalidó una reclamación previa, volver a habilitar reclamaciones.
+    if ((lineaInvalidada || bingoInvalidado) && estado.partidaActiva) {
+      estado.reclamacionesHabilitadas = true;
+      nsJugador.emit('partida:reclamaciones-habilitadas');
+      nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
     }
 
     console.log(`[Servidor] Frase descantada: "${frase}". Recalculados ganadores.`);
     nsJugador.emit('partida:frase-descantada', { frase, cantadas: estado.cantadas });
-    nsGestor.emit('partida:frase-descantada',  { frase, cantadas: estado.cantadas });
-    // Enviar estado actualizado a todos los moderadores
-    nsGestor.emit('estado:actual', {
-      frases: estado.frases,
-      cantadas: estado.cantadas,
-      verificadas: estado.verificadas,
-      olvidadas: estado.olvidadas,
-      jugadores: Object.values(estado.jugadores),
+    nsJugador.emit('partida:estado-recalculado', {
       lineaGanada: estado.lineaGanada,
       bingoGanado: estado.bingoGanado,
       partidaActiva: estado.partidaActiva,
       reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
-      umbralReclamo: estado.umbralReclamo
     });
+    nsGestor.emit('partida:frase-descantada',  { frase, cantadas: estado.cantadas });
+    // Enviar estado actualizado a todos los moderadores
+    nsGestor.emit('estado:actual', construirEstadoGestor());
   });
 
   socket.on('gestor:cantar-frase', (payload) => {
@@ -654,18 +701,7 @@ nsGestor.on('connection', (socket) => {
 
   socket.on('gestor:sync-excel', () => {
     // Enviar el estado a TODOS los moderadores conectados (no solo al que pulsa)
-    nsGestor.emit('estado:actual', {
-      frases: estado.frases,
-      cantadas: estado.cantadas,
-      verificadas: estado.verificadas,
-      olvidadas: estado.olvidadas,
-      jugadores: Object.values(estado.jugadores),
-      lineaGanada: estado.lineaGanada,
-      bingoGanado: estado.bingoGanado,
-      partidaActiva: estado.partidaActiva,
-      reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
-      umbralReclamo: estado.umbralReclamo
-    });
+    nsGestor.emit('estado:actual', construirEstadoGestor());
   });
 
   socket.on('gestor:resetear', () => {
@@ -675,12 +711,91 @@ nsGestor.on('connection', (socket) => {
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
-    socket.emit('estado:actual', {
-      frases: [], cantadas: [], verificadas: [], olvidadas: [], jugadores: [],
-      lineaGanada: false, bingoGanado: false, partidaActiva: false,
-      reclamacionesHabilitadas: false, umbralReclamo: 0,
-    });
+    nsGestor.emit('estado:actual', construirEstadoGestor());
     console.log('[Servidor] Partida reseteada por el gestor.');
+  });
+
+  socket.on('gestor:buscar-jugadores', (payload) => {
+    const raw = (payload && payload.q) ? String(payload.q) : '';
+    const q = raw.trim().toLowerCase();
+    const rawLimit = parseInt((payload || {}).limit, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, rawLimit)) : 50;
+    const requestId = Number.isFinite((payload || {}).requestId)
+      ? (payload || {}).requestId
+      : parseInt((payload || {}).requestId, 10);
+
+    if (!q) {
+      socket.emit('partida:resultado-busqueda-jugadores', { q, requestId, jugadores: [] });
+      if (DEBUG_BUSQUEDA) {
+        console.log(`[Busqueda] q vacia | requestId=${requestId}`);
+      }
+      return;
+    }
+
+    if (DEBUG_BUSQUEDA) {
+      console.log(`[Busqueda] recibida q="${q}" | requestId=${requestId} | online=${Object.keys(estado.jugadores).length}`);
+    }
+
+    const online = Object.values(estado.jugadores).map(j => ({
+      socketId: j.socketId,
+      nombre: j.nombre,
+      twitch: j.twitch || '',
+      twitchVerified: j.twitchVerified || false,
+      carton: j.carton,
+      cantadoLinea: j.cantadoLinea,
+      cantadoBingo: j.cantadoBingo,
+      marcadas: j.marcadas || [],
+      online: true,
+    }));
+
+    const onlineLogins = new Set(online.map(j => j.twitch));
+    const offline = Object.entries(estado.tokens)
+      .filter(([login, datos]) => !onlineLogins.has(login) && datos && datos.nombre)
+      .map(([login, datos]) => ({
+        socketId: `offline-${login}`,
+        nombre: datos.nombre,
+        twitch: login,
+        twitchVerified: true,
+        carton: datos.carton,
+        cantadoLinea: !!datos.cantadoLinea,
+        cantadoBingo: !!datos.cantadoBingo,
+        marcadas: datos.marcadas || [],
+        online: false,
+      }));
+
+    const resultados = [...online, ...offline]
+      .filter(j => {
+        const nombre = (j.nombre || '').toLowerCase();
+        const twitch = (j.twitch || '').toLowerCase();
+        return nombre.includes(q) || twitch.includes(q);
+      })
+      .sort((a, b) => {
+        const an = (a.nombre || '').toLowerCase();
+        const bn = (b.nombre || '').toLowerCase();
+        const at = (a.twitch || '').toLowerCase();
+        const bt = (b.twitch || '').toLowerCase();
+
+        const aPrefix = an.startsWith(q) || at.startsWith(q);
+        const bPrefix = bn.startsWith(q) || bt.startsWith(q);
+        if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+
+        if (a.online !== b.online) return a.online ? -1 : 1;
+
+        return an.localeCompare(bn, 'es', { sensitivity: 'base' });
+      })
+      .slice(0, limit)
+      .map(j => ({ ...j }));
+
+    socket.emit('partida:resultado-busqueda-jugadores', {
+      q,
+      requestId,
+      totalResultados: resultados.length,
+      jugadores: resultados,
+    });
+
+    if (DEBUG_BUSQUEDA) {
+      console.log(`[Busqueda] respondida q="${q}" | requestId=${requestId} | resultados=${resultados.length}`);
+    }
   });
 
   socket.on('gestor:habilitar-reclamaciones', () => {
@@ -870,9 +985,9 @@ nsJugador.on('connection', (socket) => {
     const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
 
-    // Rate limit: 400ms máximo entre actualizaciones de marcadas por jugador
+    // Rate limit de actualizaciones de marcadas por jugador
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
-    if (ahora - (rl.lastMarcadas || 0) < 400) return;
+    if (ahora - (rl.lastMarcadas || 0) < RATE_MARCADAS_MS) return;
     rl.lastMarcadas = ahora;
     rateLimits[socket.id] = rl;
 
@@ -885,17 +1000,22 @@ nsJugador.on('connection', (socket) => {
     }
     // Delta ligero: solo manda las marcadas actualizadas de este jugador
     nsGestor.emit('partida:marcadas-actualizadas', { socketId: socket.id, marcadas: jugador.marcadas });
-  });
 
-// Guarda el num de huelgas global, no solo temporales
-const STRIKES_MAX = 3;
-const STRIKE_COOLDOWN_SEG = 30;
+    // En modo compacto, refrescar periódicamente el top enviado a gestor/moderadores.
+    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+      scheduledGestorBroadcast();
+    }
+  });
 
 function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
     const cartonSet = new Set(jugador.carton.flat());
     jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
     nsGestor.emit('partida:marcadas-actualizadas', { socketId: jugador.socketId, marcadas: jugador.marcadas });
+
+    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+      scheduledGestorBroadcast();
+    }
   }
 }
 
@@ -944,9 +1064,8 @@ function registrarFalloReclamo(jugador, socket) {
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
     
     if (!estado.reclamacionesHabilitadas) { socket.emit('partida:error', { msg: 'El gestor aún no ha habilitado las reclamaciones.' }); return; }
-    // Permitir reclamar línea si ningún jugador tiene cantadoLinea=true
-    const hayGanadorLinea = Object.values(estado.jugadores).some(j => j.cantadoLinea);
-    if (hayGanadorLinea) { socket.emit('partida:error', { msg: 'La línea ya fue cantada por otro jugador.' }); return; }
+    // Bloquea reclamación si existe una línea ganadora global vigente.
+    if (estado.lineaGanada) { socket.emit('partida:error', { msg: 'La línea ya fue cantada.' }); return; }
     if (jugador.cantadoLinea) { socket.emit('partida:error', { msg: 'Ya reclamaste una línea en esta partida.' }); return; }
     
     if (!validarLinea(jugador.carton, estado.cantadas, jugador.marcadas || [])) {
