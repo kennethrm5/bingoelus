@@ -28,8 +28,6 @@ const estado = {
   enPartida: false,
 };
 
-// Si la línea ya fue ganada globalmente (para bloquear btn-linea)
-let lineaGanadaGlobal      = false;
 // Si el gestor ha habilitado las reclamaciones
 let reclamacionesHabilitadas = false;
 // Mínimo de casillas cantadas en el cartón necesarias para poder reclamar
@@ -76,7 +74,7 @@ let btnCountdownIv = null;
 // programa un reintento automático para que el último estado siempre llegue.
 let _ultimoEnvioMarcadas = 0;
 let _timerEnvioMarcadas  = null;
-const RATE_MARCADAS_MS   = 500; // debe coincidir con el servidor
+const RATE_MARCADAS_MS   = 400; // debe coincidir con el servidor
 function enviarMarcadas() {
   clearTimeout(_timerEnvioMarcadas);
   const espera = RATE_MARCADAS_MS - (Date.now() - _ultimoEnvioMarcadas);
@@ -209,7 +207,7 @@ function actualizarTodasLasCeldas() {
 
 // resetea huelgas si se habilitan reclamaciones
 function actualizarBotones() {
-  if (reclamacionesHabilitadas && !lineaGanadaGlobal && !estado.recibimoLinea) {
+  if (reclamacionesHabilitadas && !estado.recibimoLinea) {
     penalizadoLinea = false;
     clearTimeout(penTimerLinea);
   }
@@ -223,7 +221,7 @@ function actualizarBotones() {
 // marca/desmarca la clase 'eligible' para dar feedback visual al jugador
 function actualizarEstadoVisualBotones() {
   const lineaElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoLinea && !lineaGanadaGlobal;
+                        !estado.recibimoLinea;
   const bingoElegible = reclamacionesHabilitadas && estado.enPartida &&
                         !estado.recibimoBingo;
 
@@ -361,11 +359,10 @@ function pasarAPantallaJuego(carton, cantadas, marcadasIniciales) {
 
 btnLinea.addEventListener('click', () => {
   const puedeReclamar = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoLinea && !lineaGanadaGlobal;
+                        !estado.recibimoLinea;
   if (!puedeReclamar) {
     if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
     else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
-    else if (lineaGanadaGlobal)       mostrarNotif('❌ La línea ya fue cantada.', 'info', 2500);
     else if (estado.recibimoLinea)    mostrarNotif('✅ Ya reclamaste una línea.', 'info', 2500);
     return;
   }
@@ -397,7 +394,6 @@ socket.on('disconnect', () => {
 // el servidor me asigna el cartón (también al reconectar)
 socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas: habilitadas, umbralReclamo: umbral }) => {
   reclamacionesHabilitadas = habilitadas || false;
-  lineaGanadaGlobal        = lineaGanada || false;
   umbralReclamo            = umbral ?? 0;
 
   const esReconexion = marcadas && marcadas.length > 0;
@@ -414,7 +410,6 @@ socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, 
   }
 
   if (lineaGanada) {
-    lineaGanadaGlobal = true;
     mostrarBanner('La línea ya fue cantada en esta partida.', 'linea');
   }
   if (bingoGanado) {
@@ -475,7 +470,6 @@ socket.on('partida:linea-anuncio', ({ ganador }) => {
     mostrarBanner(`🎉 ¡${ganador} ha cantado LÍNEA!`, 'linea');
     mostrarNotif(`¡${ganador} ha cantado Línea!`, 'info');
   }
-  lineaGanadaGlobal        = true;
   estado.recibimoLinea     = true;
   reclamacionesHabilitadas = false;
   actualizarBotones();
@@ -545,7 +539,6 @@ socket.on('partida:nueva', () => {
     recibimoBingo: false,
     enPartida: false,
   });
-  lineaGanadaGlobal        = false;
   reclamacionesHabilitadas = false;
   umbralReclamo            = 0;
   penalizadoLinea = false;
@@ -573,6 +566,23 @@ socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
   }
   desbloquearTodo();
   actualizarTodasLasCeldas();
+  actualizarEstadoVisualBotones();
+});
+
+// sincroniza flags globales cuando el servidor invalida una reclamación previa
+socket.on('partida:estado-recalculado', ({ lineaGanada, bingoGanado, partidaActiva, reclamacionesHabilitadas: habilitadas }) => {
+  // Si ya no existe ganador válido, permitir volver a reclamar.
+  if (!lineaGanada) estado.recibimoLinea = false;
+  if (!bingoGanado) estado.recibimoBingo = false;
+
+  reclamacionesHabilitadas = !!habilitadas;
+
+  if (partidaActiva && estado.enPartida) {
+    estadoPartida.textContent = 'Partida en curso';
+    estadoPartida.className   = 'activa';
+  }
+
+  actualizarBotones();
   actualizarEstadoVisualBotones();
 });
 

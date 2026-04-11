@@ -599,6 +599,10 @@
     frases:                   [],
     cantadas:                 [],
     jugadores:                [],
+    jugadoresBusqueda:        null,
+    modo:                     'completo',
+    totalJugadores:           0,
+    online:                   0,
     partidaActiva:            false,
     reclamacionesHabilitadas: false,
     umbralReclamo:            0,
@@ -617,6 +621,7 @@
   const contTotal       = document.getElementById('contador-total');
   const numJugadores    = document.getElementById('num-jugadores');
   const listaJugadores  = document.getElementById('lista-jugadores');
+  const buscadorJugadoresEl = document.getElementById('buscador-jugadores');
   const logEventos      = document.getElementById('log-eventos');
   const overlayPremio   = document.getElementById('overlay-premio');
   const overlayTipo     = document.getElementById('overlay-tipo');
@@ -624,6 +629,47 @@
 
   // Rastrea qué socketId tiene el acordeón abierto
   let jugadorAbierto = null;
+  let busquedaJugadoresTimer = null;
+  let refrescoRankingTimer = null;
+  let busquedaReqSeq = 0;
+  let busquedaReqPendiente = 0;
+
+  function programarRefrescoRanking() {
+    if (refrescoRankingTimer) return;
+    refrescoRankingTimer = setTimeout(() => {
+      refrescoRankingTimer = null;
+      renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
+    }, 450);
+  }
+
+  function obtenerJugadoresParaRender() {
+    const term = (document.getElementById('buscador-jugadores')?.value || '').trim();
+    if (estadoLocal.modo === 'compacto' && term.length > 0) {
+      return Array.isArray(estadoLocal.jugadoresBusqueda) ? estadoLocal.jugadoresBusqueda : [];
+    }
+    return Array.isArray(estadoLocal.jugadores) ? estadoLocal.jugadores : [];
+  }
+
+  function solicitarBusquedaJugadores(term, inmediata = false) {
+    const q = String(term || '').trim().toLowerCase();
+    clearTimeout(busquedaJugadoresTimer);
+
+    if (!q) {
+      estadoLocal.jugadoresBusqueda = null;
+      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+      return;
+    }
+
+    const emitir = () => {
+      if (!socket) return;
+      const requestId = ++busquedaReqSeq;
+      busquedaReqPendiente = requestId;
+      socket.emit('gestor:buscar-jugadores', { q, limit: 50, requestId });
+    };
+
+    if (inmediata) emitir();
+    else busquedaJugadoresTimer = setTimeout(emitir, 220);
+  }
 
   // -- Claxon mp3 ---------------------------------------------
   const audioClaxon = new Audio('/media/claxon.mp3');
@@ -928,15 +974,22 @@
 
   // -- Renderizar lista de jugadores (acordeón) ----------
   function renderizarCartones(jugadores, cantadas) {
+    const termBusqueda = (document.getElementById('buscador-jugadores')?.value || '').trim();
     const cantadasSet = new Set(cantadas);
-    const onlineCount  = jugadores.filter(j => j.online !== false).length;
-    const totalCount   = jugadores.length;
+    const onlineCount  = Number.isFinite(estadoLocal.online) ? estadoLocal.online : jugadores.filter(j => j.online !== false).length;
+    const totalCount   = Number.isFinite(estadoLocal.totalJugadores) && estadoLocal.totalJugadores > 0 ? estadoLocal.totalJugadores : jugadores.length;
     numJugadores.textContent = totalCount > onlineCount
       ? `${onlineCount} / ${totalCount}`
       : onlineCount;
 
     if (jugadores.length === 0) {
-      listaJugadores.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>';
+      if (estadoLocal.modo === 'compacto' && termBusqueda.length > 0) {
+        listaJugadores.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">No hay coincidencias para esa búsqueda.</p>';
+      } else if (estadoLocal.modo === 'compacto' && onlineCount > 0) {
+        listaJugadores.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">Modo compacto activo (&gt;300). Usa el buscador para localizar un jugador conectado.</p>';
+      } else {
+        listaJugadores.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>';
+      }
       jugadorAbierto = null;
       return;
     }
@@ -949,8 +1002,14 @@
     const jugadoresOrdenados = [...jugadores].sort((a, b) => {
       const marcadasA = new Set(a.marcadas || []);
       const marcadasB = new Set(b.marcadas || []);
-      const faltantesA = a.carton.flat().filter(f => !(cantadasSet.has(f) && marcadasA.has(f))).length;
-      const faltantesB = b.carton.flat().filter(f => !(cantadasSet.has(f) && marcadasB.has(f))).length;
+      const cartonA = Array.isArray(a.carton) ? a.carton.flat() : [];
+      const cartonB = Array.isArray(b.carton) ? b.carton.flat() : [];
+      const faltantesA = cartonA.length > 0
+        ? cartonA.filter(f => !(cantadasSet.has(f) && marcadasA.has(f))).length
+        : Number.MAX_SAFE_INTEGER;
+      const faltantesB = cartonB.length > 0
+        ? cartonB.filter(f => !(cantadasSet.has(f) && marcadasB.has(f))).length
+        : Number.MAX_SAFE_INTEGER;
       return faltantesA - faltantesB;
     });
 
@@ -1063,12 +1122,27 @@
       listaJugadores.appendChild(fila);
     });
 
-    aplicarFiltroJugadores(); // Reaplicar el buscador
+    aplicarFiltroJugadores(true); // Reaplicar el buscador local (sin relanzar búsqueda remota)
   }
 
   // -- Buscador de Jugadores ------------------------------
-  function aplicarFiltroJugadores() {
+  function aplicarFiltroJugadores(desdeRender = false) {
     const term = document.getElementById('buscador-jugadores').value.toLowerCase();
+
+    if (estadoLocal.modo === 'compacto') {
+      if (desdeRender) return;
+
+      // Evita mantener visible el top por defecto mientras se espera la respuesta remota.
+      if (term.trim()) {
+        estadoLocal.jugadoresBusqueda = [];
+        renderizarCartones([], estadoLocal.cantadas);
+      }
+
+      // En compacto priorizamos fiabilidad frente a debounce.
+      solicitarBusquedaJugadores(term, true);
+      return;
+    }
+
     const filas = document.querySelectorAll('.jugador-fila');
     filas.forEach(fila => {
       const nombre = fila.querySelector('.jugador-nombre')?.textContent.toLowerCase() || '';
@@ -1080,7 +1154,23 @@
     });
   }
 
-  document.getElementById('buscador-jugadores').addEventListener('input', aplicarFiltroJugadores);
+  function enlazarEventosBuscadorJugadores() {
+    if (!buscadorJugadoresEl) return;
+
+    const disparar = (ev) => {
+      if (ev && ev.type === 'paste') {
+        setTimeout(() => aplicarFiltroJugadores(false), 0);
+        return;
+      }
+      aplicarFiltroJugadores(false);
+    };
+
+    ['input', 'keyup', 'change', 'paste'].forEach(evt => {
+      buscadorJugadoresEl.addEventListener(evt, disparar);
+    });
+  }
+
+  enlazarEventosBuscadorJugadores();
 
   // -- Actualizar toda la UI con un estado completo -------
   function actualizarGanadoresHeader() {
@@ -1100,9 +1190,10 @@
 
   function aplicarEstado(nuevoEstado) {
     estadoLocal = { ...estadoLocal, ...nuevoEstado };
+    if (estadoLocal.modo !== 'compacto') estadoLocal.jugadoresBusqueda = null;
     renderizarFrases(estadoLocal.frases, estadoLocal.cantadas);
     renderizarSeguimiento(estadoLocal.frases, estadoLocal.cantadas);
-    renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
     actualizarGanadoresHeader();
     if (typeof nuevoEstado.reclamacionesHabilitadas === 'boolean') {
       actualizarBotonReclamaciones(nuevoEstado.reclamacionesHabilitadas);
@@ -1122,6 +1213,13 @@
       document.getElementById('overlay-conexion').style.display = 'none';
       const url = window.location.origin;
       document.getElementById('txt-url').textContent = url;
+
+      // Si se reconecta con un término ya escrito, relanzar búsqueda en cuanto llegue estado.
+      const term = (document.getElementById('buscador-jugadores')?.value || '').trim();
+      if (term) {
+        estadoLocal.jugadoresBusqueda = [];
+      }
+
       agregarLog('Conectado al servidor.', 'ok');
     });
     socket.on('connect_error', (err) => {
@@ -1136,6 +1234,13 @@
     // Estado completo (al conectar o tras reset)
     socket.on('estado:actual', (data) => {
       aplicarEstado(data);
+
+      // Si el buscador está activo en modo compacto, reconsultar para mantener resultados coherentes.
+      const term = (document.getElementById('buscador-jugadores')?.value || '').trim();
+      if (data && data.modo === 'compacto' && term) {
+        solicitarBusquedaJugadores(term, true);
+      }
+
       agregarLog('Estado del servidor sincronizado.', 'info');
     });
 
@@ -1175,7 +1280,7 @@
     estadoLocal.cantadas = cantadas;
     renderizarFrases(estadoLocal.frases, cantadas);
     renderizarSeguimiento(estadoLocal.frases, cantadas);
-    renderizarCartones(estadoLocal.jugadores, cantadas);
+      renderizarCartones(obtenerJugadoresParaRender(), cantadas);
     agregarLog(`Descantada: "${frase}"`, 'warn');
   });
 
@@ -1192,34 +1297,65 @@
     estadoLocal.cantadas = cantadas;
     renderizarFrases(estadoLocal.frases, cantadas);
     renderizarSeguimiento(estadoLocal.frases, cantadas);
-    renderizarCartones(estadoLocal.jugadores, cantadas);
+    renderizarCartones(obtenerJugadoresParaRender(), cantadas);
     agregarLog(`Cantada: "${frase}"`, 'warn');
   });
 
   // Nuevo jugador o jugador desconectado
-  socket.on('partida:jugador-unido', ({ jugadores }) => {
-    estadoLocal.jugadores = jugadores;
-    renderizarCartones(jugadores, estadoLocal.cantadas);
-    const n = jugadores.length;
+  socket.on('partida:jugador-unido', (data = {}) => {
+    estadoLocal = { ...estadoLocal, ...data, jugadores: data.jugadores || [] };
+    if (estadoLocal.modo !== 'compacto') {
+      estadoLocal.jugadoresBusqueda = null;
+      renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    } else {
+      const term = (document.getElementById('buscador-jugadores').value || '').trim();
+      if (term) solicitarBusquedaJugadores(term, true);
+      else renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+    }
+    const n = Number.isFinite(estadoLocal.online) ? estadoLocal.online : estadoLocal.jugadores.length;
     agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+  });
+
+  socket.on('partida:resultado-busqueda-jugadores', ({ q, jugadores, requestId }) => {
+    const termActual = (document.getElementById('buscador-jugadores')?.value || '').trim().toLowerCase();
+    const qResp = String(q || '').trim().toLowerCase();
+    const reqId = Number.isFinite(requestId) ? requestId : parseInt(requestId, 10);
+
+    if (Number.isFinite(reqId) && reqId < busquedaReqPendiente) return;
+
+    if (estadoLocal.modo === 'compacto' && !termActual) return;
+
+    // Ignorar respuestas antiguas para evitar resultados incoherentes al escribir rápido.
+    if (estadoLocal.modo === 'compacto' && termActual && qResp && qResp !== termActual) return;
+
+    estadoLocal.jugadoresBusqueda = Array.isArray(jugadores) ? jugadores : [];
+    renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
   });
 
   // Delta de marcadas: solo actualiza las celdas de ese jugador sin reconstruir la lista
   socket.on('partida:marcadas-actualizadas', ({ socketId, marcadas }) => {
     const jug = estadoLocal.jugadores.find(j => j.socketId === socketId);
     if (jug) jug.marcadas = marcadas;
+    const jugBusqueda = Array.isArray(estadoLocal.jugadoresBusqueda)
+      ? estadoLocal.jugadoresBusqueda.find(j => j.socketId === socketId)
+      : null;
+    if (jugBusqueda) jugBusqueda.marcadas = marcadas;
     const fila = listaJugadores.querySelector(`[data-id="${socketId}"]`);
-    if (!fila) return;
-    const marcadasSet = new Set(marcadas);
-    const cantadasSet = new Set(estadoLocal.cantadas);
-    fila.querySelectorAll('.celda').forEach(celda => {
-      const frase = celda.querySelector('span')?.textContent;
-      if (!frase) return;
-      const esCantada = cantadasSet.has(frase);
-      const esMarcada = marcadasSet.has(frase);
-      celda.className = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
-      celda.title = esMarcada ? `? Marcada: ${frase}` : frase;
-    });
+    if (fila) {
+      const marcadasSet = new Set(marcadas);
+      const cantadasSet = new Set(estadoLocal.cantadas);
+      fila.querySelectorAll('.celda').forEach(celda => {
+        const frase = celda.querySelector('span')?.textContent;
+        if (!frase) return;
+        const esCantada = cantadasSet.has(frase);
+        const esMarcada = marcadasSet.has(frase);
+        celda.className = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
+        celda.title = esMarcada ? `? Marcada: ${frase}` : frase;
+      });
+    }
+
+    // Reordenar el ranking en tiempo real sin reconstruir en cada evento.
+    programarRefrescoRanking();
   });
 
   // Línea válida
@@ -1230,7 +1366,7 @@
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
     if (jug) {
       jug.cantadoLinea = true;
-        renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+        renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
         setTimeout(() => generarYDescargarImagenCarton(jug, 'Linea'), 500);
       }
     actualizarGanadoresHeader();
@@ -1244,7 +1380,7 @@
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
     if (jug) {
       jug.cantadoBingo = true;
-        renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
+        renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
         setTimeout(() => generarYDescargarImagenCarton(jug, 'Bingo'), 500);
       }
     actualizarGanadoresHeader();
