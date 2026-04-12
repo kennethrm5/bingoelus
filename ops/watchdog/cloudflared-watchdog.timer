@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bingoelus Cloudflared Watchdog every 30s
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=cloudflared-watchdog.service
+
+[Install]
+WantedBy=timers.target

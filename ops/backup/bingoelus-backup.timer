@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bingoelus backup every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=bingoelus-backup.service
+
+[Install]
+WantedBy=timers.target
