@@ -1,0 +1,11 @@
+[Unit]
+Description=Bingoelus Cloudflared Watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/bingoelus-cloudflared-watchdog
+ExecStart=/opt/bingoelus/ops/watchdog/cloudflared-watchdog.sh
+User=root
+Group=root

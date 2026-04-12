@@ -51,6 +51,8 @@ const estado = {
   lineaGanada: false,
   bingoGanado: false,
   partidaActiva: false,
+  partidaIniciadaTs: 0,
+  discordCartonesNotificados: {},
   reclamacionesHabilitadas: false,
   umbralReclamo: 0,
 };
@@ -61,6 +63,14 @@ const RATE_MARCADAS_MS = 400;
 const STRIKES_MAX = 3;
 const STRIKE_COOLDOWN_SEG = 30;
 const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
+const DISCORD_WEBHOOK_USERNAME = process.env.DISCORD_WEBHOOK_USERNAME || 'Bingoelus Bot';
+const DISCORD_WEBHOOK_AVATAR_URL = process.env.DISCORD_WEBHOOK_AVATAR_URL || '';
+const DISCORD_NOTIFY_ON_END = process.env.DISCORD_NOTIFY_ON_END !== '0';
+const DISCORD_NOTIFY_WINNER_ON_CARD = process.env.DISCORD_NOTIFY_WINNER_ON_CARD !== '0';
+const DISCORD_ATTACH_RESULTS = process.env.DISCORD_ATTACH_RESULTS !== '0';
+const DISCORD_WINNERS_DIR = process.env.DISCORD_WINNERS_DIR || '/opt/bingoelus/ganadores';
+const DISCORD_MAX_FILE_BYTES = Math.max(256 * 1024, parseInt(process.env.DISCORD_MAX_FILE_BYTES, 10) || (8 * 1024 * 1024));
 
 // Debounce del broadcast de jugadores al gestor
 // Con muchos jugadores se espera más para agrupar más actualizaciones
@@ -158,7 +168,7 @@ function validarBingo(carton, cantadas, marcadas, umbral) {
 }
 
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
-function guardarResultados(ganadoresLinea, ganadoresBingo) {
+async function guardarResultados(ganadoresLinea, ganadoresBingo) {
   const dir = path.join(__dirname, 'resultados');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -179,10 +189,181 @@ function guardarResultados(ganadoresLinea, ganadoresBingo) {
   ].join('\n');
 
   const archivo = path.join(dir, `${fecha}_${hora}.txt`);
-  fs.writeFile(archivo, contenido, 'utf8', err => {
-    if (err) console.error('[Servidor] Error al guardar resultados:', err);
-    else console.log(`[Servidor] Resultados guardados en ${archivo}`);
-  });
+  try {
+    await fs.promises.writeFile(archivo, contenido, 'utf8');
+    console.log(`[Servidor] Resultados guardados en ${archivo}`);
+    return archivo;
+  } catch (err) {
+    console.error('[Servidor] Error al guardar resultados:', err);
+    return null;
+  }
+}
+
+function bufferDesdeDataUrlPng(dataUrl) {
+  const raw = String(dataUrl || '').trim();
+  const match = raw.match(/^data:image\/png;base64,(.+)$/i);
+  if (!match || !match[1]) return null;
+  try {
+    return Buffer.from(match[1], 'base64');
+  } catch {
+    return null;
+  }
+}
+
+async function construirAdjuntosDiscord({ archivoResultados }) {
+  const adjuntos = [];
+
+  if (DISCORD_ATTACH_RESULTS && archivoResultados && fs.existsSync(archivoResultados)) {
+    try {
+      const stat = await fs.promises.stat(archivoResultados);
+      if (stat.size <= DISCORD_MAX_FILE_BYTES) {
+        const buffer = await fs.promises.readFile(archivoResultados);
+        adjuntos.push({
+          fileName: path.basename(archivoResultados),
+          mimeType: 'text/plain',
+          buffer,
+        });
+      } else {
+        console.warn(`[Servidor] TXT de resultados supera el tamaño máximo para Discord (${stat.size} bytes).`);
+      }
+    } catch (err) {
+      console.error('[Servidor] No se pudo adjuntar el TXT de resultados:', err.message || err);
+    }
+  }
+
+  return adjuntos;
+}
+
+async function notificarDiscordFinPartida({ ganadoresLinea, ganadoresBingo, totalOnline, totalJugadores, totalCantadas, umbral, archivoResultados }) {
+  if (!DISCORD_NOTIFY_ON_END || !DISCORD_WEBHOOK_URL) return;
+  if (typeof fetch !== 'function') {
+    console.warn('[Servidor] Fetch no disponible: no se pudo enviar webhook de Discord.');
+    return;
+  }
+
+  const lineaTxt = (ganadoresLinea && ganadoresLinea.length)
+    ? ganadoresLinea.map(g => `- ${g}`).join('\n')
+    : '- (ninguno)';
+
+  const bingoTxt = (ganadoresBingo && ganadoresBingo.length)
+    ? ganadoresBingo.map(g => `- ${g}`).join('\n')
+    : '- (ninguno)';
+
+  const contenido = [
+    '🏁 **Partida terminada en Bingoelus**',
+    `👥 Jugadores: ${totalOnline} online / ${totalJugadores} totales`,
+    `🗣️ Frases cantadas: ${totalCantadas} | Umbral: ${umbral}`,
+    '',
+    '**Ganadores de Línea**',
+    lineaTxt,
+    '',
+    '**Ganadores de Bingo**',
+    bingoTxt,
+  ].join('\n');
+
+  const payload = {
+    username: DISCORD_WEBHOOK_USERNAME,
+    content: contenido,
+    allowed_mentions: { parse: [] },
+  };
+
+  if (DISCORD_WEBHOOK_AVATAR_URL) {
+    payload.avatar_url = DISCORD_WEBHOOK_AVATAR_URL;
+  }
+
+  try {
+    const adjuntos = await construirAdjuntosDiscord({ archivoResultados });
+
+    if (!adjuntos.length || typeof FormData !== 'function' || typeof Blob !== 'function') {
+      if (adjuntos.length && (typeof FormData !== 'function' || typeof Blob !== 'function')) {
+        console.warn('[Servidor] FormData/Blob no disponible; se envía solo texto al webhook.');
+      }
+
+      const resp = await fetch(DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const detalle = await resp.text().catch(() => 'sin detalle');
+        console.error(`[Servidor] Error webhook Discord (${resp.status}): ${detalle}`);
+      }
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('payload_json', JSON.stringify(payload));
+
+    adjuntos.forEach((adjunto, idx) => {
+      const blob = new Blob([adjunto.buffer], { type: adjunto.mimeType });
+      formData.append(`files[${idx}]`, blob, adjunto.fileName);
+    });
+
+    const resp = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const detalle = await resp.text().catch(() => 'sin detalle');
+      console.error(`[Servidor] Error webhook Discord (${resp.status}): ${detalle}`);
+    }
+  } catch (err) {
+    console.error('[Servidor] Error enviando webhook de Discord:', err.message || err);
+  }
+}
+
+async function notificarDiscordGanadorConCarton({ nombre, twitch, tipoPremio, dataUrl, fileName }) {
+  if (!DISCORD_NOTIFY_WINNER_ON_CARD || !DISCORD_WEBHOOK_URL) return;
+  if (typeof fetch !== 'function' || typeof FormData !== 'function' || typeof Blob !== 'function') {
+    console.warn('[Servidor] Runtime sin soporte FormData/Blob: no se puede adjuntar cartón a Discord.');
+    return;
+  }
+
+  const imagenBuffer = bufferDesdeDataUrlPng(dataUrl);
+  if (!imagenBuffer) {
+    console.warn('[Servidor] dataUrl de cartón inválida para Discord.');
+    return;
+  }
+  if (imagenBuffer.length > DISCORD_MAX_FILE_BYTES) {
+    console.warn(`[Servidor] Cartón omitido por tamaño (${imagenBuffer.length} bytes).`);
+    return;
+  }
+
+  const tipoTexto = String(tipoPremio || 'Premio').trim() || 'Premio';
+  const ganadorTexto = twitch ? `${nombre} (@${twitch})` : nombre;
+  const contenido = [
+    `🏆 **Ganador de ${tipoTexto.toUpperCase()}**`,
+    `👤 ${ganadorTexto}`,
+  ].join('\n');
+
+  const payload = {
+    username: DISCORD_WEBHOOK_USERNAME,
+    content: contenido,
+    allowed_mentions: { parse: [] },
+  };
+  if (DISCORD_WEBHOOK_AVATAR_URL) {
+    payload.avatar_url = DISCORD_WEBHOOK_AVATAR_URL;
+  }
+
+  const formData = new FormData();
+  formData.append('payload_json', JSON.stringify(payload));
+  formData.append('files[0]', new Blob([imagenBuffer], { type: 'image/png' }), fileName || 'carton_ganador.png');
+
+  try {
+    const resp = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const detalle = await resp.text().catch(() => 'sin detalle');
+      console.error(`[Servidor] Error webhook ganador (${resp.status}): ${detalle}`);
+    }
+  } catch (err) {
+    console.error('[Servidor] Error enviando ganador con cartón a Discord:', err.message || err);
+  }
 }
 
 // ─── Resumen de jugadores (para el gestor) ───────────────────
@@ -513,6 +694,15 @@ expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+expressApp.get('/healthz', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    ts: Date.now(),
+    jugadoresOnline: Object.keys(estado.jugadores).length,
+    partidaActiva: estado.partidaActiva,
+  });
+});
+
 expressApp.get('/', (req, res, next) => {
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
@@ -568,6 +758,8 @@ nsGestor.on('connection', (socket) => {
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
+    estado.partidaIniciadaTs        = Date.now();
+    estado.discordCartonesNotificados = {};
     estado.reclamacionesHabilitadas = false;
     estado.umbralReclamo            = 0;
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
@@ -708,6 +900,8 @@ nsGestor.on('connection', (socket) => {
     estado.cantadas = []; estado.verificadas = []; estado.olvidadas = [];
     estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
     estado.lineaGanada = false; estado.bingoGanado = false; estado.partidaActiva = false;
+    estado.partidaIniciadaTs = 0;
+    estado.discordCartonesNotificados = {};
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
@@ -836,22 +1030,42 @@ nsGestor.on('connection', (socket) => {
     estado.reclamacionesHabilitadas = false;
 
     const jugadores = Object.values(estado.jugadores);
-    const ganadoresLinea = jugadores.filter(j => j.cantadoLinea).map(j => `  - ${j.nombre} (@${j.twitch})`);
-    const ganadoresBingo = jugadores.filter(j => j.cantadoBingo).map(j => `  - ${j.nombre} (@${j.twitch})`);
+    const ganadoresLineaDiscord = jugadores.filter(j => j.cantadoLinea).map(j => `${j.nombre} (@${j.twitch})`);
+    const ganadoresBingoDiscord = jugadores.filter(j => j.cantadoBingo).map(j => `${j.nombre} (@${j.twitch})`);
+    const ganadoresLinea = ganadoresLineaDiscord.map(g => `  - ${g}`);
+    const ganadoresBingo = ganadoresBingoDiscord.map(g => `  - ${g}`);
     const ganadores = jugadores.filter(j => j.cantadoBingo).map(j => j.nombre);
 
     console.log(`[Servidor] Partida terminada. Ganadores de Bingo: ${ganadores.join(', ') || 'ninguno'}`);
     nsJugador.emit('partida:juego-terminado', { ganadores });
     nsGestor.emit('partida:juego-terminado',  { ganadores });
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
-    guardarResultados(ganadoresLinea, ganadoresBingo);
+
+    void (async () => {
+      const archivoResultados = await guardarResultados(ganadoresLinea, ganadoresBingo);
+      await notificarDiscordFinPartida({
+        ganadoresLinea: ganadoresLineaDiscord,
+        ganadoresBingo: ganadoresBingoDiscord,
+        totalOnline: jugadores.length,
+        totalJugadores: Object.keys(estado.tokens).length,
+        totalCantadas: estado.cantadas.length,
+        umbral: estado.umbralReclamo,
+        archivoResultados,
+      });
+    })();
   });
 
   socket.on('gestor:guardar-carton', (payload) => {
     if (!payload || !payload.nombre || !payload.dataUrl) return;
     try {
-      const base64Data = payload.dataUrl.replace(/^data:image\/png;base64,/, '');
+      const bufferPng = bufferDesdeDataUrlPng(payload.dataUrl);
+      if (!bufferPng) {
+        console.error('[Servidor] dataUrl de cartón inválida.');
+        return;
+      }
+
       const nombreLimpio = payload.nombre.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const tipoPremio = String(payload.tipoPremio || 'Premio').trim() || 'Premio';
       
       // Fecha en formato YYYY-MM-DD_HHMM
       const ahora = new Date();
@@ -859,20 +1073,31 @@ nsGestor.on('connection', (socket) => {
       const fechaStr = fechaISO.split('T')[0];
       const horaStr = fechaISO.split('T')[1].replace(/[:.]/g, '').substring(0, 4);
       
-      const fileName = `${nombreLimpio}_${fechaStr}_${horaStr}_${payload.tipoPremio}.png`;
-      const dirPath = '/opt/bingoelus/ganadores';
+      const fileName = `${nombreLimpio}_${fechaStr}_${horaStr}_${tipoPremio}.png`;
+      const dirPath = DISCORD_WINNERS_DIR;
       
-      const fs = require('fs');
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
       
       const filePath = path.join(dirPath, fileName);
-      fs.writeFile(filePath, base64Data, 'base64', (err) => {
+      fs.writeFile(filePath, bufferPng, (err) => {
         if (err) {
           console.error('[Servidor] Error guardando cartón ganador:', err);
         } else {
           console.log(`[Servidor] Cartón ganador guardado en: ${filePath}`);
+
+          const dedupeKey = `${estado.partidaIniciadaTs}|${nombreLimpio}|${tipoPremio.toLowerCase()}`;
+          if (!estado.discordCartonesNotificados[dedupeKey]) {
+            estado.discordCartonesNotificados[dedupeKey] = Date.now();
+            void notificarDiscordGanadorConCarton({
+              nombre: payload.nombre,
+              twitch: payload.twitch || '',
+              tipoPremio,
+              dataUrl: payload.dataUrl,
+              fileName,
+            });
+          }
         }
       });
     } catch (e) {

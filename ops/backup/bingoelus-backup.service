@@ -1,0 +1,11 @@
+[Unit]
+Description=Bingoelus Backup Sync (ganadores/resultados)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/bingoelus-backup
+ExecStart=/opt/bingoelus/ops/backup/bingoelus-backup.sh
+User=root
+Group=root

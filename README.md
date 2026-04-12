@@ -40,3 +40,64 @@ Para garantizar la estabilidad en producción, se desarrollaron scripts personal
 - **Panel de "Gestor" protegido:** Interfaz de control en tiempo real protegida por token para el administrador del evento.
 - **Sincronización bidireccional:** Estado de cartones, casillas cantadas y premios sincronizados al milisegundo mediante WebSockets.
 - **Reconexión resiliente:** Si un jugador cierra el navegador o pierde cobertura, su cartón y estado de casillas marcadas se recuperan automáticamente al volver a entrar gracias al almacenamiento en memoria asociado a su Twitch ID.
+
+## 🛡️ Watchdog de Cloudflared + Backup Automático
+
+Se añadieron artefactos operativos para Linux en `ops/watchdog` y `ops/backup`.
+
+### 1) Instalar scripts y units en la VM
+
+```bash
+cd /opt/bingoelus
+chmod +x ops/watchdog/cloudflared-watchdog.sh
+chmod +x ops/backup/bingoelus-backup.sh
+
+sudo cp ops/watchdog/cloudflared-watchdog.service /etc/systemd/system/
+sudo cp ops/watchdog/cloudflared-watchdog.timer /etc/systemd/system/
+sudo cp ops/backup/bingoelus-backup.service /etc/systemd/system/
+sudo cp ops/backup/bingoelus-backup.timer /etc/systemd/system/
+
+sudo cp ops/watchdog/bingoelus-cloudflared-watchdog.env.example /etc/default/bingoelus-cloudflared-watchdog
+sudo cp ops/backup/bingoelus-backup.env.example /etc/default/bingoelus-backup
+```
+
+### 2) Ajustar configuración
+
+- Edita `/etc/default/bingoelus-cloudflared-watchdog`:
+	- `PRIMARY_SERVICE`, `CLONE_SERVICE`
+	- `PUBLIC_HEALTH_URL` (ej: `https://tu-dominio/healthz`)
+	- Opcional: `PRIMARY_TUNNEL`, `CLONE_TUNNEL` para validar mínimo de conexiones.
+
+- Edita `/etc/default/bingoelus-backup`:
+	- `SOURCE_DIRS` (por defecto: `/opt/bingoelus/ganadores:/opt/bingoelus/servidor/resultados`)
+	- `BACKUP_BASE`, `RETENTION_DAYS`
+	- Recomendado en GCP: `GSUTIL_BUCKET` (ej: `gs://bingoelus-backups`)
+	- Opcional fallback: `RCLONE_TARGET` si prefieres rclone.
+
+- Variables de Discord (opcional, ganador inmediato con cartón + TXT al terminar):
+	- `DISCORD_WEBHOOK_URL`
+	- `DISCORD_WEBHOOK_USERNAME` (default: `Bingoelus Bot`)
+	- `DISCORD_WEBHOOK_AVATAR_URL` (opcional)
+	- `DISCORD_NOTIFY_ON_END=1` (pon `0` para desactivar)
+	- `DISCORD_NOTIFY_WINNER_ON_CARD=1` (pon `0` para desactivar avisos inmediatos de ganador)
+	- `DISCORD_ATTACH_RESULTS=1` (adjunta TXT; `0` para desactivar)
+	- `DISCORD_WINNERS_DIR=/opt/bingoelus/ganadores`
+	- `DISCORD_MAX_FILE_BYTES=8388608`
+
+### 3) Activar timers
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflared-watchdog.timer
+sudo systemctl enable --now bingoelus-backup.timer
+```
+
+### 4) Verificación rápida
+
+```bash
+curl -fsS http://127.0.0.1:3000/healthz
+sudo systemctl status cloudflared-watchdog.timer --no-pager
+sudo systemctl status bingoelus-backup.timer --no-pager
+journalctl -u cloudflared-watchdog.service -n 50 --no-pager
+journalctl -u bingoelus-backup.service -n 50 --no-pager
+```
