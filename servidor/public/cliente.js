@@ -40,6 +40,11 @@ let penalizadoLinea = false;
 let penalizadoBingo = false;
 let penTimerLinea   = null;
 let penTimerBingo   = null;
+let reclamoLineaPendiente = false;
+let reclamoBingoPendiente = false;
+let reclamoLineaTimer = null;
+let reclamoBingoTimer = null;
+const RECLAMO_ACK_TIMEOUT_MS = 2500;
 
 // referencias DOM
 const pantallaLogin  = document.getElementById('pantalla-login');
@@ -74,7 +79,7 @@ let btnCountdownIv = null;
 // programa un reintento automático para que el último estado siempre llegue.
 let _ultimoEnvioMarcadas = 0;
 let _timerEnvioMarcadas  = null;
-const RATE_MARCADAS_MS   = 400; // debe coincidir con el servidor
+const RATE_MARCADAS_MS   = 120; // debe coincidir con el servidor
 function enviarMarcadas() {
   clearTimeout(_timerEnvioMarcadas);
   const espera = RATE_MARCADAS_MS - (Date.now() - _ultimoEnvioMarcadas);
@@ -360,25 +365,55 @@ function pasarAPantallaJuego(carton, cantadas, marcadasIniciales) {
 btnLinea.addEventListener('click', () => {
   const puedeReclamar = reclamacionesHabilitadas && estado.enPartida &&
                         !estado.recibimoLinea;
+  if (reclamoLineaPendiente) {
+    mostrarNotif('⏳ Tu reclamación de línea sigue en proceso...', 'info', 1500);
+    return;
+  }
   if (!puedeReclamar) {
     if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
     else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
     else if (estado.recibimoLinea)    mostrarNotif('✅ Ya reclamaste una línea.', 'info', 2500);
     return;
   }
-  socket.emit('jugador:pedir-linea', { marcadas: Array.from(estado.marcadas) });
+  reclamoLineaPendiente = true;
+  clearTimeout(reclamoLineaTimer);
+  reclamoLineaTimer = setTimeout(() => {
+    if (!reclamoLineaPendiente) return;
+    reclamoLineaPendiente = false;
+    mostrarNotif('⚠️ No llegó respuesta del servidor para línea. Revisa conexión e inténtalo de nuevo.', 'error', 3500);
+  }, RECLAMO_ACK_TIMEOUT_MS);
+
+  socket.emit('jugador:pedir-linea', { marcadas: Array.from(estado.marcadas) }, () => {
+    clearTimeout(reclamoLineaTimer);
+    reclamoLineaPendiente = false;
+  });
 });
 
 btnBingo.addEventListener('click', () => {
   const puedeReclamar = reclamacionesHabilitadas && estado.enPartida &&
                         !estado.recibimoBingo;
+  if (reclamoBingoPendiente) {
+    mostrarNotif('⏳ Tu reclamación de bingo sigue en proceso...', 'info', 1500);
+    return;
+  }
   if (!puedeReclamar) {
     if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
     else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
     else if (estado.recibimoBingo)    mostrarNotif('✅ Ya reclamaste el bingo.', 'info', 2500);
     return;
   }
-  socket.emit('jugador:pedir-bingo', { marcadas: Array.from(estado.marcadas) });
+  reclamoBingoPendiente = true;
+  clearTimeout(reclamoBingoTimer);
+  reclamoBingoTimer = setTimeout(() => {
+    if (!reclamoBingoPendiente) return;
+    reclamoBingoPendiente = false;
+    mostrarNotif('⚠️ No llegó respuesta del servidor para bingo. Revisa conexión e inténtalo de nuevo.', 'error', 3500);
+  }, RECLAMO_ACK_TIMEOUT_MS);
+
+  socket.emit('jugador:pedir-bingo', { marcadas: Array.from(estado.marcadas) }, () => {
+    clearTimeout(reclamoBingoTimer);
+    reclamoBingoPendiente = false;
+  });
 });
 
 // eventos socket.io
@@ -388,6 +423,10 @@ socket.on('connect', () => {
 });
 
 socket.on('disconnect', () => {
+  clearTimeout(reclamoLineaTimer);
+  clearTimeout(reclamoBingoTimer);
+  reclamoLineaPendiente = false;
+  reclamoBingoPendiente = false;
   mostrarNotif('⚠️ Desconectado del servidor. Recarga la página.', 'error', 0);
 });
 
@@ -450,6 +489,8 @@ function mostrarModalPremio(tipo) {
 
 // ── Tu reclamación de Línea fue ACEPTADA ──────────────────
 socket.on('tu:linea-valida', ({ ganador }) => {
+  clearTimeout(reclamoLineaTimer);
+  reclamoLineaPendiente = false;
   estado.recibimoLinea = true;
   actualizarBotones();
   mostrarModalPremio('linea');
@@ -457,6 +498,8 @@ socket.on('tu:linea-valida', ({ ganador }) => {
 
 // ── Tu reclamación de Bingo fue ACEPTADA ────────────────────
 socket.on('tu:bingo-valido', ({ ganador }) => {
+  clearTimeout(reclamoBingoTimer);
+  reclamoBingoPendiente = false;
   estado.recibimoBingo = true;
   actualizarBotones();
   estadoPartida.textContent = '¡Has ganado el Bingo!';
@@ -466,6 +509,8 @@ socket.on('tu:bingo-valido', ({ ganador }) => {
 
 // ── Anuncio público: alguien cantó Línea ─────────────────────
 socket.on('partida:linea-anuncio', ({ ganador }) => {
+  clearTimeout(reclamoLineaTimer);
+  reclamoLineaPendiente = false;
   if (ganador !== estado.nombre) {
     mostrarBanner(`🎉 ¡${ganador} ha cantado LÍNEA!`, 'linea');
     mostrarNotif(`¡${ganador} ha cantado Línea!`, 'info');
@@ -519,10 +564,18 @@ socket.on('partida:reclamaciones-deshabilitadas', () => {
 
 
 socket.on('partida:error', ({ msg }) => {
+  clearTimeout(reclamoLineaTimer);
+  clearTimeout(reclamoBingoTimer);
+  reclamoLineaPendiente = false;
+  reclamoBingoPendiente = false;
   mostrarNotif(`❌ ${msg}`, 'error');
 });
 
 socket.on('tu:bloqueado', ({ segs, msg }) => {
+  clearTimeout(reclamoLineaTimer);
+  clearTimeout(reclamoBingoTimer);
+  reclamoLineaPendiente = false;
+  reclamoBingoPendiente = false;
   mostrarNotif(`⛔ ${msg}`, 'error', 4000);
   bloquearTodo(segs);
   setTimeout(() => desbloquearTodo(), segs * 1000);
