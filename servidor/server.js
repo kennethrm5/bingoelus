@@ -58,11 +58,12 @@ const estado = {
 };
 
 const rateLimits = {};
-const RATE_LIMIT_MS = 3000;
-const RATE_MARCADAS_MS = 400;
+const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
+const RATE_MARCADAS_MS = 120;
 const STRIKES_MAX = 3;
 const STRIKE_COOLDOWN_SEG = 30;
 const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
+const DEBUG_RECLAMOS = process.env.DEBUG_RECLAMOS === '1';
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
 const DISCORD_WEBHOOK_USERNAME = process.env.DISCORD_WEBHOOK_USERNAME || 'Bingoelus Bot';
 const DISCORD_WEBHOOK_AVATAR_URL = process.env.DISCORD_WEBHOOK_AVATAR_URL || '';
@@ -1277,13 +1278,12 @@ function registrarFalloReclamo(jugador, socket) {
   }
 }
 
-  socket.on('jugador:pedir-linea', ({ marcadas: marcadasFrescas } = {}) => {
+  socket.on('jugador:pedir-linea', ({ marcadas: marcadasFrescas } = {}, ack) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
-    if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
+    if (typeof ack === 'function') ack({ ok: true, recibido: true, tipo: 'linea', ts: ahora });
+    if (!jugador) { socket.emit('partida:error', { msg: 'Refresca la página, apareces desconectado.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
-    if (ahora - rl.lastLinea < RATE_LIMIT_MS) return;
-    rl.lastLinea = ahora; rateLimits[socket.id] = rl;
     
     // Actualizar marcadas con las frescas del cliente antes de validar
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
@@ -1294,6 +1294,15 @@ function registrarFalloReclamo(jugador, socket) {
     if (jugador.cantadoLinea) { socket.emit('partida:error', { msg: 'Ya reclamaste una línea en esta partida.' }); return; }
     
     if (!validarLinea(jugador.carton, estado.cantadas, jugador.marcadas || [])) {
+      const esperaLineaMs = RATE_LIMIT_RECLAMO_INVALIDO_MS - (ahora - rl.lastLinea);
+      if (esperaLineaMs > 0) {
+        socket.emit('partida:error', { msg: `Aún no es línea válida. Espera ${Math.ceil(esperaLineaMs / 1000)}s para volver a reclamar.` });
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Reclamos] Línea inválida rate-limited para ${jugador.nombre} (${Math.ceil(esperaLineaMs / 1000)}s restantes)`);
+        }
+        return;
+      }
+      rl.lastLinea = ahora; rateLimits[socket.id] = rl;
       const fraseFaltante = frasePendienteParaLinea(jugador);
       registrarFalloReclamo(jugador, socket);
       console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
@@ -1311,15 +1320,17 @@ function registrarFalloReclamo(jugador, socket) {
     nsJugador.emit('partida:linea-anuncio', payload);
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+    if (DEBUG_RECLAMOS) {
+      console.log(`[Reclamos] Línea válida aceptada para ${jugador.nombre} (@${jugador.twitch})`);
+    }
   });
 
-  socket.on('jugador:pedir-bingo', ({ marcadas: marcadasFrescas } = {}) => {
+  socket.on('jugador:pedir-bingo', ({ marcadas: marcadasFrescas } = {}, ack) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
+    if (typeof ack === 'function') ack({ ok: true, recibido: true, tipo: 'bingo', ts: ahora });
     if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
-    if (ahora - rl.lastBingo < RATE_LIMIT_MS) return;
-    rl.lastBingo = ahora; rateLimits[socket.id] = rl;
     
     // Actualizar marcadas con las frescas del cliente antes de validar
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
@@ -1329,6 +1340,15 @@ function registrarFalloReclamo(jugador, socket) {
     if (jugador.cantadoBingo) { socket.emit('partida:error', { msg: 'Ya reclamaste bingo en esta partida.' }); return; }
     
     if (!validarBingo(jugador.carton, estado.cantadas, jugador.marcadas || [], estado.umbralReclamo)) {
+      const esperaBingoMs = RATE_LIMIT_RECLAMO_INVALIDO_MS - (ahora - rl.lastBingo);
+      if (esperaBingoMs > 0) {
+        socket.emit('partida:error', { msg: `Aún no es bingo válido. Espera ${Math.ceil(esperaBingoMs / 1000)}s para volver a reclamar.` });
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Reclamos] Bingo inválido rate-limited para ${jugador.nombre} (${Math.ceil(esperaBingoMs / 1000)}s restantes)`);
+        }
+        return;
+      }
+      rl.lastBingo = ahora; rateLimits[socket.id] = rl;
       const fraseFaltante = frasePendienteParaBingo(jugador);
       registrarFalloReclamo(jugador, socket);
       console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
@@ -1345,6 +1365,9 @@ function registrarFalloReclamo(jugador, socket) {
     nsJugador.emit('partida:bingo-anuncio', payload);
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+    if (DEBUG_RECLAMOS) {
+      console.log(`[Reclamos] Bingo válido aceptado para ${jugador.nombre} (@${jugador.twitch})`);
+    }
   });
 
   socket.on('disconnect', () => {
