@@ -18,20 +18,26 @@ const http    = require('http');
 const TARGET_URL  = process.argv[2] || 'https://bingoelus.online';
 const NUM_CLIENTS = parseInt(process.argv[3] || '500',  10);
 const DURATION_S  = parseInt(process.argv[4] || '30',   10);
-const HTTP_WORKERS = 20; // hilos HTTP paralelos
-
-// 🔥 ESCENARIO 1: LA ESTAMPIDA (Todos intentan entrar en menos de un segundo)
-const RAMP_MS = 500; 
+const RAMP_MS     = parseInt(process.argv[5] || '5000', 10);
+const CONNECT_TIMEOUT_MS = parseInt(process.argv[6] || '30000', 10);
+const JOIN_TIMEOUT_MS = parseInt(process.argv[7] || String(Math.max(8000, Math.floor(CONNECT_TIMEOUT_MS * 0.7))), 10);
+const HTTP_WORKERS = parseInt(process.argv[8] || '20', 10); // hilos HTTP paralelos
+const ENABLE_CHAOS = (process.argv[9] || '0') === '1';
 
 // ── Métricas ────────────────────────────────────────────────────
 const m = {
   http:  { ok: 0, err: 0, totalMs: 0, count: 0 },
   ws:    { ok: 0, err: 0 },
   join:  { ok: 0, err: 0 },
+  game:  { err: 0 },
   marca: { sent: 0 },
   linea: { sent: 0 },
   bingo: { sent: 0 },
   dc:    { count: 0 },
+  reasons: {
+    connectError: Object.create(null),
+    joinError: Object.create(null),
+  },
 };
 
 let stopped = false;
@@ -69,13 +75,59 @@ async function httpWorker() {
 // ── Simular un cliente jugador vía Socket.io ────────────────────
 function simularJugador(id) {
   const frasesDemo = Array.from({ length: 25 }, (_, i) => `frase-demo-${i}`);
+  let joined = false;
+  let joinResuelto = false;
+  let iv = null;
 
   const sock = io(`${TARGET_URL}/jugador`, {
     transports: ['websocket'],
     reconnection: false,
-    timeout:      10_000,
+    timeout:      CONNECT_TIMEOUT_MS,
+    forceNew: true,
+    multiplex: false,
   });
+  sock.data = { joined: false };
   sockets.push(sock);
+
+  function contarMapa(mapa, clave) {
+    mapa[clave] = (mapa[clave] || 0) + 1;
+  }
+
+  function resolverJoin(ok, motivo) {
+    if (joinResuelto) return;
+    joinResuelto = true;
+    if (ok) {
+      m.join.ok++;
+      joined = true;
+      sock.data.joined = true;
+      return;
+    }
+    sock.data.joined = false;
+    m.join.err++;
+    contarMapa(m.reasons.joinError, motivo || 'join_error_desconocido');
+  }
+
+  function iniciarAcciones() {
+    if (iv) return;
+    iv = setInterval(() => {
+      if (stopped || !sock.connected || !joined) { clearInterval(iv); iv = null; return; }
+
+      const r = Math.random();
+
+      if (r < 0.60) {
+        const n       = Math.floor(Math.random() * 15);
+        const marcadas = frasesDemo.slice(0, n);
+        sock.emit('jugador:actualizar-marcadas', { marcadas });
+        m.marca.sent++;
+      } else if (r < 0.82) {
+        sock.emit('jugador:pedir-linea');
+        m.linea.sent++;
+      } else {
+        sock.emit('jugador:pedir-bingo');
+        m.bingo.sent++;
+      }
+    }, 1500 + Math.random() * 3500);
+  }
 
   sock.on('connect', () => {
     m.ws.ok++;
@@ -85,38 +137,39 @@ function simularJugador(id) {
       token:  `stress-token-${id}-${Math.random().toString(36).slice(2)}`,
     });
 
-    const iv = setInterval(() => {
-      if (stopped || !sock.connected) { clearInterval(iv); return; }
-
-      const r = Math.random();
-
-      // 🔥 ESCENARIO 3: LA CAÍDA DEL METRO (5% pierde la conexión)
-      if (r < 0.05) {
-        sock.disconnect();
-        // Vuelve a intentar conectar en 3 segundos
-        setTimeout(() => { if (!stopped) sock.connect(); }, 3000); 
-        return;
+    // Si no responde join (ni ok ni error) lo contamos explícitamente.
+    setTimeout(() => {
+      if (!joinResuelto) {
+        resolverJoin(false, 'join_timeout');
       }
-
-      if (r < 0.55) {
-        const n       = Math.floor(Math.random() * 15);
-        const marcadas = frasesDemo.slice(0, n);
-        sock.emit('jugador:actualizar-marcadas', { marcadas });
-        m.marca.sent++;
-      } else if (r < 0.80) {
-        sock.emit('jugador:pedir-linea');
-        m.linea.sent++;
-      } else {
-        sock.emit('jugador:pedir-bingo');
-        m.bingo.sent++;
-      }
-    }, 1500 + Math.random() * 3500);
+    }, JOIN_TIMEOUT_MS);
   });
 
-  sock.on('tu:carton',     () => { m.join.ok++; });
-  sock.on('partida:error', () => { m.join.err++; });
-  sock.on('connect_error', () => { m.ws.err++;  });
-  sock.on('disconnect',    () => { m.dc.count++;  });
+  sock.on('tu:carton', () => {
+    resolverJoin(true);
+    iniciarAcciones();
+  });
+
+  sock.on('partida:error', (p = {}) => {
+    const motivo = typeof p.msg === 'string' && p.msg.trim() ? p.msg.trim() : 'partida_error_sin_msg';
+    if (!joinResuelto) {
+      resolverJoin(false, motivo);
+      return;
+    }
+    m.game.err++;
+  });
+
+  sock.on('connect_error', (err) => {
+    m.ws.err++;
+    const motivo = (err && (err.message || err.description || err.type)) || 'connect_error_desconocido';
+    contarMapa(m.reasons.connectError, String(motivo));
+  });
+
+  sock.on('disconnect', () => {
+    joined = false;
+    sock.data.joined = false;
+    m.dc.count++;
+  });
 }
 
 // 🔥 ESCENARIO 2: EL EFECTO REBAÑO (Todos envían datos a la vez)
@@ -125,7 +178,8 @@ function iniciarCaosSimultaneo() {
     if (stopped) return;
     console.log('\n🔥 [CAOS] Efecto Rebaño: ¡Todos los bots envían clics a la vez!');
     sockets.forEach(sock => {
-      if (sock.connected) {
+      const joined = sock && sock.data && sock.data.joined;
+      if (sock.connected && joined) {
         sock.emit('jugador:actualizar-marcadas', { marcadas: ['frase-caos-1', 'frase-caos-2'] });
         m.marca.sent++;
       }
@@ -138,12 +192,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ── Main ────────────────────────────────────────────────────────
 async function main() {
-  console.log('\n🎱  Bingoelus Stress Test EXTREMO');
+  console.log('\n🎱  Bingoelus Stress Test');
   console.log(`   Target   : ${TARGET_URL}`);
   console.log(`   Clientes WS  : ${NUM_CLIENTS}`);
   console.log(`   Workers HTTP : ${HTTP_WORKERS}`);
   console.log(`   Duración : ${DURATION_S}s`);
-  console.log(`   Rampa    : ${(RAMP_MS / 1000).toFixed(1)}s (ESTAMPIDA)\n`);
+  console.log(`   Rampa    : ${(RAMP_MS / 1000).toFixed(1)}s\n`);
+  console.log(`   Timeout conexión : ${CONNECT_TIMEOUT_MS}ms`);
+  console.log(`   Timeout join     : ${JOIN_TIMEOUT_MS}ms`);
+  console.log(`   Modo caos        : ${ENABLE_CHAOS ? 'ON' : 'OFF'}\n`);
 
   for (let i = 0; i < HTTP_WORKERS; i++) httpWorker();
 
@@ -152,8 +209,8 @@ async function main() {
     setTimeout(() => { if (!stopped) simularJugador(i); }, i * delayPerClient);
   }
 
-  // Arrancar simulación de picos
-  iniciarCaosSimultaneo();
+  // Arrancar simulación de picos solo cuando se solicita.
+  if (ENABLE_CHAOS) iniciarCaosSimultaneo();
 
   let tick = 0;
   const progressIv = setInterval(() => {
@@ -199,10 +256,35 @@ async function main() {
   console.log(`  🔌 Desconexiones: ${m.dc.count}`);
   console.log('');
   console.log('WebSocket — eventos emitidos');
-  console.log(`  jugador:unirse              : ${m.ws.ok} intentos  (${m.join.ok} aceptados, ${m.join.err} rechazados)`);
+  console.log(`  jugador:unirse              : ${m.ws.ok} conectados  (${m.join.ok} aceptados, ${m.join.err} rechazados)`);
   console.log(`  jugador:actualizar-marcadas : ${m.marca.sent}`);
   console.log(`  jugador:pedir-linea         : ${m.linea.sent}`);
   console.log(`  jugador:pedir-bingo         : ${m.bingo.sent}`);
+  console.log(`  partida:error (post-join)   : ${m.game.err}`);
+
+  const topConnectErrors = Object.entries(m.reasons.connectError)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  const topJoinErrors = Object.entries(m.reasons.joinError)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  if (topConnectErrors.length) {
+    console.log('');
+    console.log('Top connect_error (hasta 5):');
+    topConnectErrors.forEach(([motivo, count]) => {
+      console.log(`  - ${motivo}: ${count}`);
+    });
+  }
+
+  if (topJoinErrors.length) {
+    console.log('');
+    console.log('Top join errors (hasta 5):');
+    topJoinErrors.forEach(([motivo, count]) => {
+      console.log(`  - ${motivo}: ${count}`);
+    });
+  }
+
   console.log('══════════════════════════════════════════════\n');
 
   process.exit(0);

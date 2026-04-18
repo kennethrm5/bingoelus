@@ -38,6 +38,12 @@ const CARTON_COLS = 5;
 const CARTON_ROWS = 5;
 const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
 
+function leerEnvInt(nombre, porDefecto, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const raw = parseInt(process.env[nombre], 10);
+  if (!Number.isFinite(raw)) return porDefecto;
+  return Math.max(min, Math.min(max, raw));
+}
+
 // ─── Estado del juego ─────────────────────────────────────────
 
 const estado = {
@@ -51,16 +57,39 @@ const estado = {
   lineaGanada: false,
   bingoGanado: false,
   partidaActiva: false,
+  partidaIniciadaTs: 0,
+  discordCartonesNotificados: {},
   reclamacionesHabilitadas: false,
   umbralReclamo: 0,
 };
 
 const rateLimits = {};
-const RATE_LIMIT_MS = 3000;
-const RATE_MARCADAS_MS = 400;
+const rateLimitsBusquedaGestor = {};
+
+const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
+const RATE_MARCADAS_BASE_MS = leerEnvInt('RATE_MARCADAS_BASE_MS', 120, 40, 2000);
+const RATE_MARCADAS_MEDIA_MS = leerEnvInt('RATE_MARCADAS_MEDIA_MS', 160, RATE_MARCADAS_BASE_MS, 3000);
+const RATE_MARCADAS_ALTA_MS = leerEnvInt('RATE_MARCADAS_ALTA_MS', 220, RATE_MARCADAS_MEDIA_MS, 5000);
+const ONLINE_MEDIA_THRESHOLD = leerEnvInt('ONLINE_MEDIA_THRESHOLD', 400, 100, 5000);
+const ONLINE_ALTA_THRESHOLD = leerEnvInt('ONLINE_ALTA_THRESHOLD', 800, ONLINE_MEDIA_THRESHOLD + 1, 15000);
+const BATCH_MARCADAS_BASE_MS = leerEnvInt('BATCH_MARCADAS_BASE_MS', 90, 20, 2000);
+const BATCH_MARCADAS_MEDIA_MS = leerEnvInt('BATCH_MARCADAS_MEDIA_MS', 180, BATCH_MARCADAS_BASE_MS, 3000);
+const BATCH_MARCADAS_ALTA_MS = leerEnvInt('BATCH_MARCADAS_ALTA_MS', 280, BATCH_MARCADAS_MEDIA_MS, 5000);
+const BUSQUEDA_GESTOR_RATE_MS = leerEnvInt('BUSQUEDA_GESTOR_RATE_MS', 140, 50, 3000);
+const HEALTHZ_VERBOSE = process.env.HEALTHZ_VERBOSE === '1';
+const ALLOW_STRESS_BOTS = process.env.ALLOW_STRESS_BOTS === '1';
 const STRIKES_MAX = 3;
 const STRIKE_COOLDOWN_SEG = 30;
 const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
+const DEBUG_RECLAMOS = process.env.DEBUG_RECLAMOS === '1';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
+const DISCORD_WEBHOOK_USERNAME = process.env.DISCORD_WEBHOOK_USERNAME || 'Bingoelus Bot';
+const DISCORD_WEBHOOK_AVATAR_URL = process.env.DISCORD_WEBHOOK_AVATAR_URL || '';
+const DISCORD_NOTIFY_ON_END = process.env.DISCORD_NOTIFY_ON_END !== '0';
+const DISCORD_NOTIFY_WINNER_ON_CARD = process.env.DISCORD_NOTIFY_WINNER_ON_CARD !== '0';
+const DISCORD_ATTACH_RESULTS = process.env.DISCORD_ATTACH_RESULTS !== '0';
+const DISCORD_WINNERS_DIR = process.env.DISCORD_WINNERS_DIR || '/opt/bingoelus/ganadores';
+const DISCORD_MAX_FILE_BYTES = Math.max(256 * 1024, parseInt(process.env.DISCORD_MAX_FILE_BYTES, 10) || (8 * 1024 * 1024));
 
 // Debounce del broadcast de jugadores al gestor
 // Con muchos jugadores se espera más para agrupar más actualizaciones
@@ -72,6 +101,106 @@ function scheduledGestorBroadcast() {
     gestorBroadcastTimer = null;
     nsGestor.emit('partida:jugador-unido', resumenJugadores());
   }, delay);
+}
+
+let gestorMarcadasTimer = null;
+const gestorMarcadasPendientes = new Map();
+const metricas = {
+  inicioTs: Date.now(),
+  loopLagMs: 0,
+  ultimoSegundo: {
+    marcadasEntrantes: 0,
+    marcadasAceptadas: 0,
+    marcadasEmitidasGestor: 0,
+    busquedasGestor: 0,
+    busquedasRateLimited: 0,
+  },
+  total: {
+    marcadasEntrantes: 0,
+    marcadasAceptadas: 0,
+    marcadasEmitidasGestor: 0,
+    busquedasGestor: 0,
+    busquedasRateLimited: 0,
+    busquedasMsAcumulados: 0,
+    busquedasResueltas: 0,
+  },
+};
+
+const contadorSegundo = {
+  marcadasEntrantes: 0,
+  marcadasAceptadas: 0,
+  marcadasEmitidasGestor: 0,
+  busquedasGestor: 0,
+  busquedasRateLimited: 0,
+};
+
+function registrarMetrica(nombre, cantidad = 1) {
+  if (!Object.prototype.hasOwnProperty.call(contadorSegundo, nombre)) return;
+  contadorSegundo[nombre] += cantidad;
+  metricas.total[nombre] += cantidad;
+}
+
+let siguienteTickMetricas = Date.now() + 1000;
+setInterval(() => {
+  // Event-loop lag proxy to detect runtime pressure.
+  const ahora = Date.now();
+  metricas.loopLagMs = Math.max(0, ahora - siguienteTickMetricas);
+  siguienteTickMetricas = ahora + 1000;
+
+  metricas.ultimoSegundo = {
+    marcadasEntrantes: contadorSegundo.marcadasEntrantes,
+    marcadasAceptadas: contadorSegundo.marcadasAceptadas,
+    marcadasEmitidasGestor: contadorSegundo.marcadasEmitidasGestor,
+    busquedasGestor: contadorSegundo.busquedasGestor,
+    busquedasRateLimited: contadorSegundo.busquedasRateLimited,
+  };
+
+  contadorSegundo.marcadasEntrantes = 0;
+  contadorSegundo.marcadasAceptadas = 0;
+  contadorSegundo.marcadasEmitidasGestor = 0;
+  contadorSegundo.busquedasGestor = 0;
+  contadorSegundo.busquedasRateLimited = 0;
+}, 1000).unref();
+
+function obtenerRateMarcadasMs() {
+  // Adaptive server-side pacing based on current online users.
+  const online = Object.keys(estado.jugadores).length;
+  if (online >= ONLINE_ALTA_THRESHOLD) return RATE_MARCADAS_ALTA_MS;
+  if (online >= ONLINE_MEDIA_THRESHOLD) return RATE_MARCADAS_MEDIA_MS;
+  return RATE_MARCADAS_BASE_MS;
+}
+
+function obtenerVentanaBatchMarcadasMs() {
+  // Batch window grows with load to reduce broadcast pressure.
+  const online = Object.keys(estado.jugadores).length;
+  if (online >= ONLINE_ALTA_THRESHOLD) return BATCH_MARCADAS_ALTA_MS;
+  if (online >= ONLINE_MEDIA_THRESHOLD) return BATCH_MARCADAS_MEDIA_MS;
+  return BATCH_MARCADAS_BASE_MS;
+}
+
+function limpiarColaMarcadasGestor() {
+  if (gestorMarcadasTimer) {
+    clearTimeout(gestorMarcadasTimer);
+    gestorMarcadasTimer = null;
+  }
+  gestorMarcadasPendientes.clear();
+}
+
+function programarMarcadasParaGestor(socketId, marcadas) {
+  // Keep only the latest state per player inside the current batch window.
+  gestorMarcadasPendientes.set(socketId, Array.isArray(marcadas) ? [...marcadas] : []);
+  if (gestorMarcadasTimer) return;
+
+  gestorMarcadasTimer = setTimeout(() => {
+    gestorMarcadasTimer = null;
+    if (!gestorMarcadasPendientes.size) return;
+
+    for (const [sid, marks] of gestorMarcadasPendientes.entries()) {
+      nsGestor.emit('partida:marcadas-actualizadas', { socketId: sid, marcadas: marks });
+      registrarMetrica('marcadasEmitidasGestor');
+    }
+    gestorMarcadasPendientes.clear();
+  }, obtenerVentanaBatchMarcadasMs());
 }
 
 // ─── Twitch OAuth ─────────────────────────────────────────────
@@ -158,7 +287,7 @@ function validarBingo(carton, cantadas, marcadas, umbral) {
 }
 
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
-function guardarResultados(ganadoresLinea, ganadoresBingo) {
+async function guardarResultados(ganadoresLinea, ganadoresBingo) {
   const dir = path.join(__dirname, 'resultados');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -179,10 +308,181 @@ function guardarResultados(ganadoresLinea, ganadoresBingo) {
   ].join('\n');
 
   const archivo = path.join(dir, `${fecha}_${hora}.txt`);
-  fs.writeFile(archivo, contenido, 'utf8', err => {
-    if (err) console.error('[Servidor] Error al guardar resultados:', err);
-    else console.log(`[Servidor] Resultados guardados en ${archivo}`);
-  });
+  try {
+    await fs.promises.writeFile(archivo, contenido, 'utf8');
+    console.log(`[Servidor] Resultados guardados en ${archivo}`);
+    return archivo;
+  } catch (err) {
+    console.error('[Servidor] Error al guardar resultados:', err);
+    return null;
+  }
+}
+
+function bufferDesdeDataUrlPng(dataUrl) {
+  const raw = String(dataUrl || '').trim();
+  const match = raw.match(/^data:image\/png;base64,(.+)$/i);
+  if (!match || !match[1]) return null;
+  try {
+    return Buffer.from(match[1], 'base64');
+  } catch {
+    return null;
+  }
+}
+
+async function construirAdjuntosDiscord({ archivoResultados }) {
+  const adjuntos = [];
+
+  if (DISCORD_ATTACH_RESULTS && archivoResultados && fs.existsSync(archivoResultados)) {
+    try {
+      const stat = await fs.promises.stat(archivoResultados);
+      if (stat.size <= DISCORD_MAX_FILE_BYTES) {
+        const buffer = await fs.promises.readFile(archivoResultados);
+        adjuntos.push({
+          fileName: path.basename(archivoResultados),
+          mimeType: 'text/plain',
+          buffer,
+        });
+      } else {
+        console.warn(`[Servidor] TXT de resultados supera el tamaño máximo para Discord (${stat.size} bytes).`);
+      }
+    } catch (err) {
+      console.error('[Servidor] No se pudo adjuntar el TXT de resultados:', err.message || err);
+    }
+  }
+
+  return adjuntos;
+}
+
+async function notificarDiscordFinPartida({ ganadoresLinea, ganadoresBingo, totalOnline, totalJugadores, totalCantadas, umbral, archivoResultados }) {
+  if (!DISCORD_NOTIFY_ON_END || !DISCORD_WEBHOOK_URL) return;
+  if (typeof fetch !== 'function') {
+    console.warn('[Servidor] Fetch no disponible: no se pudo enviar webhook de Discord.');
+    return;
+  }
+
+  const lineaTxt = (ganadoresLinea && ganadoresLinea.length)
+    ? ganadoresLinea.map(g => `- ${g}`).join('\n')
+    : '- (ninguno)';
+
+  const bingoTxt = (ganadoresBingo && ganadoresBingo.length)
+    ? ganadoresBingo.map(g => `- ${g}`).join('\n')
+    : '- (ninguno)';
+
+  const contenido = [
+    '🏁 **Partida terminada en Bingoelus**',
+    `👥 Jugadores: ${totalOnline} online / ${totalJugadores} totales`,
+    `🗣️ Frases cantadas: ${totalCantadas} | Umbral: ${umbral}`,
+    '',
+    '**Ganadores de Línea**',
+    lineaTxt,
+    '',
+    '**Ganadores de Bingo**',
+    bingoTxt,
+  ].join('\n');
+
+  const payload = {
+    username: DISCORD_WEBHOOK_USERNAME,
+    content: contenido,
+    allowed_mentions: { parse: [] },
+  };
+
+  if (DISCORD_WEBHOOK_AVATAR_URL) {
+    payload.avatar_url = DISCORD_WEBHOOK_AVATAR_URL;
+  }
+
+  try {
+    const adjuntos = await construirAdjuntosDiscord({ archivoResultados });
+
+    if (!adjuntos.length || typeof FormData !== 'function' || typeof Blob !== 'function') {
+      if (adjuntos.length && (typeof FormData !== 'function' || typeof Blob !== 'function')) {
+        console.warn('[Servidor] FormData/Blob no disponible; se envía solo texto al webhook.');
+      }
+
+      const resp = await fetch(DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const detalle = await resp.text().catch(() => 'sin detalle');
+        console.error(`[Servidor] Error webhook Discord (${resp.status}): ${detalle}`);
+      }
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('payload_json', JSON.stringify(payload));
+
+    adjuntos.forEach((adjunto, idx) => {
+      const blob = new Blob([adjunto.buffer], { type: adjunto.mimeType });
+      formData.append(`files[${idx}]`, blob, adjunto.fileName);
+    });
+
+    const resp = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const detalle = await resp.text().catch(() => 'sin detalle');
+      console.error(`[Servidor] Error webhook Discord (${resp.status}): ${detalle}`);
+    }
+  } catch (err) {
+    console.error('[Servidor] Error enviando webhook de Discord:', err.message || err);
+  }
+}
+
+async function notificarDiscordGanadorConCarton({ nombre, twitch, tipoPremio, dataUrl, fileName }) {
+  if (!DISCORD_NOTIFY_WINNER_ON_CARD || !DISCORD_WEBHOOK_URL) return;
+  if (typeof fetch !== 'function' || typeof FormData !== 'function' || typeof Blob !== 'function') {
+    console.warn('[Servidor] Runtime sin soporte FormData/Blob: no se puede adjuntar cartón a Discord.');
+    return;
+  }
+
+  const imagenBuffer = bufferDesdeDataUrlPng(dataUrl);
+  if (!imagenBuffer) {
+    console.warn('[Servidor] dataUrl de cartón inválida para Discord.');
+    return;
+  }
+  if (imagenBuffer.length > DISCORD_MAX_FILE_BYTES) {
+    console.warn(`[Servidor] Cartón omitido por tamaño (${imagenBuffer.length} bytes).`);
+    return;
+  }
+
+  const tipoTexto = String(tipoPremio || 'Premio').trim() || 'Premio';
+  const ganadorTexto = twitch ? `${nombre} (@${twitch})` : nombre;
+  const contenido = [
+    `🏆 **Ganador de ${tipoTexto.toUpperCase()}**`,
+    `👤 ${ganadorTexto}`,
+  ].join('\n');
+
+  const payload = {
+    username: DISCORD_WEBHOOK_USERNAME,
+    content: contenido,
+    allowed_mentions: { parse: [] },
+  };
+  if (DISCORD_WEBHOOK_AVATAR_URL) {
+    payload.avatar_url = DISCORD_WEBHOOK_AVATAR_URL;
+  }
+
+  const formData = new FormData();
+  formData.append('payload_json', JSON.stringify(payload));
+  formData.append('files[0]', new Blob([imagenBuffer], { type: 'image/png' }), fileName || 'carton_ganador.png');
+
+  try {
+    const resp = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const detalle = await resp.text().catch(() => 'sin detalle');
+      console.error(`[Servidor] Error webhook ganador (${resp.status}): ${detalle}`);
+    }
+  } catch (err) {
+    console.error('[Servidor] Error enviando ganador con cartón a Discord:', err.message || err);
+  }
 }
 
 // ─── Resumen de jugadores (para el gestor) ───────────────────
@@ -513,6 +813,58 @@ expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+expressApp.get('/healthz', (_req, res) => {
+  const online = Object.keys(estado.jugadores).length;
+  const mem = process.memoryUsage();
+  const response = {
+    ok: true,
+    ts: Date.now(),
+    jugadoresOnline: online,
+    partidaActiva: estado.partidaActiva,
+  };
+
+  if (HEALTHZ_VERBOSE) {
+    const promedioBusquedaMs = metricas.total.busquedasResueltas
+      ? Number((metricas.total.busquedasMsAcumulados / metricas.total.busquedasResueltas).toFixed(2))
+      : 0;
+
+    response.metricas = {
+      uptimeSeg: Math.floor(process.uptime()),
+      loopLagMs: metricas.loopLagMs,
+      rssMb: Math.round(mem.rss / 1024 / 1024),
+      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+      authQueue: authQueue.length,
+      colaMarcadasPendientes: gestorMarcadasPendientes.size,
+      ratesActivos: {
+        marcadasMs: obtenerRateMarcadasMs(),
+        batchMarcadasMs: obtenerVentanaBatchMarcadasMs(),
+        busquedaGestorRateMs: BUSQUEDA_GESTOR_RATE_MS,
+      },
+      ultimoSegundo: metricas.ultimoSegundo,
+      acumulado: {
+        marcadasEntrantes: metricas.total.marcadasEntrantes,
+        marcadasAceptadas: metricas.total.marcadasAceptadas,
+        marcadasEmitidasGestor: metricas.total.marcadasEmitidasGestor,
+        busquedasGestor: metricas.total.busquedasGestor,
+        busquedasRateLimited: metricas.total.busquedasRateLimited,
+        promedioBusquedaMs,
+      },
+      configuracion: {
+        onlineMediaThreshold: ONLINE_MEDIA_THRESHOLD,
+        onlineAltaThreshold: ONLINE_ALTA_THRESHOLD,
+        rateMarcadasBaseMs: RATE_MARCADAS_BASE_MS,
+        rateMarcadasMediaMs: RATE_MARCADAS_MEDIA_MS,
+        rateMarcadasAltaMs: RATE_MARCADAS_ALTA_MS,
+        batchMarcadasBaseMs: BATCH_MARCADAS_BASE_MS,
+        batchMarcadasMediaMs: BATCH_MARCADAS_MEDIA_MS,
+        batchMarcadasAltaMs: BATCH_MARCADAS_ALTA_MS,
+      },
+    };
+  }
+
+  res.status(200).json(response);
+});
+
 expressApp.get('/', (req, res, next) => {
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
@@ -568,6 +920,9 @@ nsGestor.on('connection', (socket) => {
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
+    estado.partidaIniciadaTs        = Date.now();
+    estado.discordCartonesNotificados = {};
+    limpiarColaMarcadasGestor();
     estado.reclamacionesHabilitadas = false;
     estado.umbralReclamo            = 0;
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
@@ -708,7 +1063,10 @@ nsGestor.on('connection', (socket) => {
     estado.cantadas = []; estado.verificadas = []; estado.olvidadas = [];
     estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
     estado.lineaGanada = false; estado.bingoGanado = false; estado.partidaActiva = false;
+    estado.partidaIniciadaTs = 0;
+    estado.discordCartonesNotificados = {};
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
+    limpiarColaMarcadasGestor();
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
@@ -716,6 +1074,17 @@ nsGestor.on('connection', (socket) => {
   });
 
   socket.on('gestor:buscar-jugadores', (payload) => {
+    const ahoraBusqueda = Date.now();
+    const rlBusquedaTs = rateLimitsBusquedaGestor[socket.id] || 0;
+    if (ahoraBusqueda - rlBusquedaTs < BUSQUEDA_GESTOR_RATE_MS) {
+      registrarMetrica('busquedasRateLimited');
+      if (DEBUG_BUSQUEDA) {
+        console.log(`[Busqueda] rate-limited socket=${socket.id} (${BUSQUEDA_GESTOR_RATE_MS}ms)`);
+      }
+      return;
+    }
+    rateLimitsBusquedaGestor[socket.id] = ahoraBusqueda;
+
     const raw = (payload && payload.q) ? String(payload.q) : '';
     const q = raw.trim().toLowerCase();
     const rawLimit = parseInt((payload || {}).limit, 10);
@@ -731,6 +1100,8 @@ nsGestor.on('connection', (socket) => {
       }
       return;
     }
+
+    registrarMetrica('busquedasGestor');
 
     if (DEBUG_BUSQUEDA) {
       console.log(`[Busqueda] recibida q="${q}" | requestId=${requestId} | online=${Object.keys(estado.jugadores).length}`);
@@ -793,6 +1164,9 @@ nsGestor.on('connection', (socket) => {
       jugadores: resultados,
     });
 
+    metricas.total.busquedasMsAcumulados += (Date.now() - ahoraBusqueda);
+    metricas.total.busquedasResueltas += 1;
+
     if (DEBUG_BUSQUEDA) {
       console.log(`[Busqueda] respondida q="${q}" | requestId=${requestId} | resultados=${resultados.length}`);
     }
@@ -836,22 +1210,42 @@ nsGestor.on('connection', (socket) => {
     estado.reclamacionesHabilitadas = false;
 
     const jugadores = Object.values(estado.jugadores);
-    const ganadoresLinea = jugadores.filter(j => j.cantadoLinea).map(j => `  - ${j.nombre} (@${j.twitch})`);
-    const ganadoresBingo = jugadores.filter(j => j.cantadoBingo).map(j => `  - ${j.nombre} (@${j.twitch})`);
+    const ganadoresLineaDiscord = jugadores.filter(j => j.cantadoLinea).map(j => `${j.nombre} (@${j.twitch})`);
+    const ganadoresBingoDiscord = jugadores.filter(j => j.cantadoBingo).map(j => `${j.nombre} (@${j.twitch})`);
+    const ganadoresLinea = ganadoresLineaDiscord.map(g => `  - ${g}`);
+    const ganadoresBingo = ganadoresBingoDiscord.map(g => `  - ${g}`);
     const ganadores = jugadores.filter(j => j.cantadoBingo).map(j => j.nombre);
 
     console.log(`[Servidor] Partida terminada. Ganadores de Bingo: ${ganadores.join(', ') || 'ninguno'}`);
     nsJugador.emit('partida:juego-terminado', { ganadores });
     nsGestor.emit('partida:juego-terminado',  { ganadores });
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
-    guardarResultados(ganadoresLinea, ganadoresBingo);
+
+    void (async () => {
+      const archivoResultados = await guardarResultados(ganadoresLinea, ganadoresBingo);
+      await notificarDiscordFinPartida({
+        ganadoresLinea: ganadoresLineaDiscord,
+        ganadoresBingo: ganadoresBingoDiscord,
+        totalOnline: jugadores.length,
+        totalJugadores: Object.keys(estado.tokens).length,
+        totalCantadas: estado.cantadas.length,
+        umbral: estado.umbralReclamo,
+        archivoResultados,
+      });
+    })();
   });
 
   socket.on('gestor:guardar-carton', (payload) => {
     if (!payload || !payload.nombre || !payload.dataUrl) return;
     try {
-      const base64Data = payload.dataUrl.replace(/^data:image\/png;base64,/, '');
+      const bufferPng = bufferDesdeDataUrlPng(payload.dataUrl);
+      if (!bufferPng) {
+        console.error('[Servidor] dataUrl de cartón inválida.');
+        return;
+      }
+
       const nombreLimpio = payload.nombre.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const tipoPremio = String(payload.tipoPremio || 'Premio').trim() || 'Premio';
       
       // Fecha en formato YYYY-MM-DD_HHMM
       const ahora = new Date();
@@ -859,20 +1253,31 @@ nsGestor.on('connection', (socket) => {
       const fechaStr = fechaISO.split('T')[0];
       const horaStr = fechaISO.split('T')[1].replace(/[:.]/g, '').substring(0, 4);
       
-      const fileName = `${nombreLimpio}_${fechaStr}_${horaStr}_${payload.tipoPremio}.png`;
-      const dirPath = '/opt/bingoelus/ganadores';
+      const fileName = `${nombreLimpio}_${fechaStr}_${horaStr}_${tipoPremio}.png`;
+      const dirPath = DISCORD_WINNERS_DIR;
       
-      const fs = require('fs');
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
       
       const filePath = path.join(dirPath, fileName);
-      fs.writeFile(filePath, base64Data, 'base64', (err) => {
+      fs.writeFile(filePath, bufferPng, (err) => {
         if (err) {
           console.error('[Servidor] Error guardando cartón ganador:', err);
         } else {
           console.log(`[Servidor] Cartón ganador guardado en: ${filePath}`);
+
+          const dedupeKey = `${estado.partidaIniciadaTs}|${nombreLimpio}|${tipoPremio.toLowerCase()}`;
+          if (!estado.discordCartonesNotificados[dedupeKey]) {
+            estado.discordCartonesNotificados[dedupeKey] = Date.now();
+            void notificarDiscordGanadorConCarton({
+              nombre: payload.nombre,
+              twitch: payload.twitch || '',
+              tipoPremio,
+              dataUrl: payload.dataUrl,
+              fileName,
+            });
+          }
         }
       });
     } catch (e) {
@@ -881,6 +1286,7 @@ nsGestor.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    delete rateLimitsBusquedaGestor[socket.id];
     console.log('[Gestor] Desconectado:', socket.id);
   });
 });
@@ -916,10 +1322,19 @@ nsJugador.on('connection', (socket) => {
       return;
     }
     if (!twUser) {
-      socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
-      return;
+      // Allow stress clients only when explicitly enabled via env var.
+      if (ALLOW_STRESS_BOTS) {
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Stress] Bot permitido sin Twitch sid en socket ${socket.id}`);
+        }
+      } else {
+        socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
+        return;
+      }
     }
-    const twitchLogin = twUser.login;
+
+    // Keep a stable synthetic login per bot token when stress bypass is enabled.
+    const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
 
     const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
     /*
@@ -959,7 +1374,7 @@ nsJugador.on('connection', (socket) => {
       ip,
       nombre:         nombreClean,
       twitch:         twitchLogin,
-      twitchVerified: true,
+      twitchVerified: !!twUser,
       carton,
       cantadoLinea:   cantadoLineaGuard,
       cantadoBingo:   cantadoBingoGuard,
@@ -984,12 +1399,15 @@ nsJugador.on('connection', (socket) => {
     const jugador = estado.jugadores[socket.id];
     const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
+    registrarMetrica('marcadasEntrantes');
 
     // Rate limit de actualizaciones de marcadas por jugador
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
-    if (ahora - (rl.lastMarcadas || 0) < RATE_MARCADAS_MS) return;
+    const rateMarcadasMs = obtenerRateMarcadasMs();
+    if (ahora - (rl.lastMarcadas || 0) < rateMarcadasMs) return;
     rl.lastMarcadas = ahora;
     rateLimits[socket.id] = rl;
+    registrarMetrica('marcadasAceptadas');
 
     const cartonSet   = new Set(jugador.carton.flat());
     jugador.marcadas = marcadas
@@ -999,7 +1417,7 @@ nsJugador.on('connection', (socket) => {
       estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
     }
     // Delta ligero: solo manda las marcadas actualizadas de este jugador
-    nsGestor.emit('partida:marcadas-actualizadas', { socketId: socket.id, marcadas: jugador.marcadas });
+    programarMarcadasParaGestor(socket.id, jugador.marcadas);
 
     // En modo compacto, refrescar periódicamente el top enviado a gestor/moderadores.
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
@@ -1011,7 +1429,7 @@ function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
     const cartonSet = new Set(jugador.carton.flat());
     jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
-    nsGestor.emit('partida:marcadas-actualizadas', { socketId: jugador.socketId, marcadas: jugador.marcadas });
+    programarMarcadasParaGestor(jugador.socketId, jugador.marcadas);
 
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
       scheduledGestorBroadcast();
@@ -1052,13 +1470,12 @@ function registrarFalloReclamo(jugador, socket) {
   }
 }
 
-  socket.on('jugador:pedir-linea', ({ marcadas: marcadasFrescas } = {}) => {
+  socket.on('jugador:pedir-linea', ({ marcadas: marcadasFrescas } = {}, ack) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
-    if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
+    if (typeof ack === 'function') ack({ ok: true, recibido: true, tipo: 'linea', ts: ahora });
+    if (!jugador) { socket.emit('partida:error', { msg: 'Refresca la página, apareces desconectado.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
-    if (ahora - rl.lastLinea < RATE_LIMIT_MS) return;
-    rl.lastLinea = ahora; rateLimits[socket.id] = rl;
     
     // Actualizar marcadas con las frescas del cliente antes de validar
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
@@ -1069,6 +1486,15 @@ function registrarFalloReclamo(jugador, socket) {
     if (jugador.cantadoLinea) { socket.emit('partida:error', { msg: 'Ya reclamaste una línea en esta partida.' }); return; }
     
     if (!validarLinea(jugador.carton, estado.cantadas, jugador.marcadas || [])) {
+      const esperaLineaMs = RATE_LIMIT_RECLAMO_INVALIDO_MS - (ahora - rl.lastLinea);
+      if (esperaLineaMs > 0) {
+        socket.emit('partida:error', { msg: `Aún no es línea válida. Espera ${Math.ceil(esperaLineaMs / 1000)}s para volver a reclamar.` });
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Reclamos] Línea inválida rate-limited para ${jugador.nombre} (${Math.ceil(esperaLineaMs / 1000)}s restantes)`);
+        }
+        return;
+      }
+      rl.lastLinea = ahora; rateLimits[socket.id] = rl;
       const fraseFaltante = frasePendienteParaLinea(jugador);
       registrarFalloReclamo(jugador, socket);
       console.log(`[Servidor] ${jugador.nombre} reclamó Línea INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
@@ -1086,15 +1512,17 @@ function registrarFalloReclamo(jugador, socket) {
     nsJugador.emit('partida:linea-anuncio', payload);
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+    if (DEBUG_RECLAMOS) {
+      console.log(`[Reclamos] Línea válida aceptada para ${jugador.nombre} (@${jugador.twitch})`);
+    }
   });
 
-  socket.on('jugador:pedir-bingo', ({ marcadas: marcadasFrescas } = {}) => {
+  socket.on('jugador:pedir-bingo', ({ marcadas: marcadasFrescas } = {}, ack) => {
     const jugador = estado.jugadores[socket.id];
     const ahora   = Date.now();
+    if (typeof ack === 'function') ack({ ok: true, recibido: true, tipo: 'bingo', ts: ahora });
     if (!jugador) { socket.emit('partida:error', { msg: 'No estás registrado en esta partida.' }); return; }
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0 };
-    if (ahora - rl.lastBingo < RATE_LIMIT_MS) return;
-    rl.lastBingo = ahora; rateLimits[socket.id] = rl;
     
     // Actualizar marcadas con las frescas del cliente antes de validar
     sanitizarMarcadasCarton(jugador, marcadasFrescas);
@@ -1104,6 +1532,15 @@ function registrarFalloReclamo(jugador, socket) {
     if (jugador.cantadoBingo) { socket.emit('partida:error', { msg: 'Ya reclamaste bingo en esta partida.' }); return; }
     
     if (!validarBingo(jugador.carton, estado.cantadas, jugador.marcadas || [], estado.umbralReclamo)) {
+      const esperaBingoMs = RATE_LIMIT_RECLAMO_INVALIDO_MS - (ahora - rl.lastBingo);
+      if (esperaBingoMs > 0) {
+        socket.emit('partida:error', { msg: `Aún no es bingo válido. Espera ${Math.ceil(esperaBingoMs / 1000)}s para volver a reclamar.` });
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Reclamos] Bingo inválido rate-limited para ${jugador.nombre} (${Math.ceil(esperaBingoMs / 1000)}s restantes)`);
+        }
+        return;
+      }
+      rl.lastBingo = ahora; rateLimits[socket.id] = rl;
       const fraseFaltante = frasePendienteParaBingo(jugador);
       registrarFalloReclamo(jugador, socket);
       console.log(`[Servidor] ${jugador.nombre} reclamó Bingo INCORRECTAMENTE. Le falta/falso: ${fraseFaltante}`);
@@ -1120,6 +1557,9 @@ function registrarFalloReclamo(jugador, socket) {
     nsJugador.emit('partida:bingo-anuncio', payload);
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+    if (DEBUG_RECLAMOS) {
+      console.log(`[Reclamos] Bingo válido aceptado para ${jugador.nombre} (@${jugador.twitch})`);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -1132,6 +1572,7 @@ function registrarFalloReclamo(jugador, socket) {
         estado.tokens[jugador.twitch].cantadoBingo = jugador.cantadoBingo;
       }
       if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
+      gestorMarcadasPendientes.delete(socket.id);
       delete estado.jugadores[socket.id];
       delete rateLimits[socket.id];
       scheduledGestorBroadcast();

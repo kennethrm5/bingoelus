@@ -915,6 +915,7 @@
     // Envía la imagen al servidor para que la guarde en la VM GCP
     socket.emit('gestor:guardar-carton', {
       nombre: jugador.nombre,
+      twitch: jugador.twitch || '',
       tipoPremio: tipoPremio,
       dataUrl: dataUrl
     });
