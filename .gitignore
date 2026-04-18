@@ -18,4 +18,5 @@ config.json
 # Archivos de empaquetado y tests
 *.exe
 resultados-*
-
+logs.txt
+pm2.txt

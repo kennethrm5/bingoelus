@@ -38,6 +38,12 @@ const CARTON_COLS = 5;
 const CARTON_ROWS = 5;
 const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
 
+function leerEnvInt(nombre, porDefecto, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const raw = parseInt(process.env[nombre], 10);
+  if (!Number.isFinite(raw)) return porDefecto;
+  return Math.max(min, Math.min(max, raw));
+}
+
 // ─── Estado del juego ─────────────────────────────────────────
 
 const estado = {
@@ -58,8 +64,20 @@ const estado = {
 };
 
 const rateLimits = {};
+const rateLimitsBusquedaGestor = {};
+
 const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
-const RATE_MARCADAS_MS = 120;
+const RATE_MARCADAS_BASE_MS = leerEnvInt('RATE_MARCADAS_BASE_MS', 120, 40, 2000);
+const RATE_MARCADAS_MEDIA_MS = leerEnvInt('RATE_MARCADAS_MEDIA_MS', 160, RATE_MARCADAS_BASE_MS, 3000);
+const RATE_MARCADAS_ALTA_MS = leerEnvInt('RATE_MARCADAS_ALTA_MS', 220, RATE_MARCADAS_MEDIA_MS, 5000);
+const ONLINE_MEDIA_THRESHOLD = leerEnvInt('ONLINE_MEDIA_THRESHOLD', 400, 100, 5000);
+const ONLINE_ALTA_THRESHOLD = leerEnvInt('ONLINE_ALTA_THRESHOLD', 800, ONLINE_MEDIA_THRESHOLD + 1, 15000);
+const BATCH_MARCADAS_BASE_MS = leerEnvInt('BATCH_MARCADAS_BASE_MS', 90, 20, 2000);
+const BATCH_MARCADAS_MEDIA_MS = leerEnvInt('BATCH_MARCADAS_MEDIA_MS', 180, BATCH_MARCADAS_BASE_MS, 3000);
+const BATCH_MARCADAS_ALTA_MS = leerEnvInt('BATCH_MARCADAS_ALTA_MS', 280, BATCH_MARCADAS_MEDIA_MS, 5000);
+const BUSQUEDA_GESTOR_RATE_MS = leerEnvInt('BUSQUEDA_GESTOR_RATE_MS', 140, 50, 3000);
+const HEALTHZ_VERBOSE = process.env.HEALTHZ_VERBOSE === '1';
+const ALLOW_STRESS_BOTS = process.env.ALLOW_STRESS_BOTS === '1';
 const STRIKES_MAX = 3;
 const STRIKE_COOLDOWN_SEG = 30;
 const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
@@ -83,6 +101,106 @@ function scheduledGestorBroadcast() {
     gestorBroadcastTimer = null;
     nsGestor.emit('partida:jugador-unido', resumenJugadores());
   }, delay);
+}
+
+let gestorMarcadasTimer = null;
+const gestorMarcadasPendientes = new Map();
+const metricas = {
+  inicioTs: Date.now(),
+  loopLagMs: 0,
+  ultimoSegundo: {
+    marcadasEntrantes: 0,
+    marcadasAceptadas: 0,
+    marcadasEmitidasGestor: 0,
+    busquedasGestor: 0,
+    busquedasRateLimited: 0,
+  },
+  total: {
+    marcadasEntrantes: 0,
+    marcadasAceptadas: 0,
+    marcadasEmitidasGestor: 0,
+    busquedasGestor: 0,
+    busquedasRateLimited: 0,
+    busquedasMsAcumulados: 0,
+    busquedasResueltas: 0,
+  },
+};
+
+const contadorSegundo = {
+  marcadasEntrantes: 0,
+  marcadasAceptadas: 0,
+  marcadasEmitidasGestor: 0,
+  busquedasGestor: 0,
+  busquedasRateLimited: 0,
+};
+
+function registrarMetrica(nombre, cantidad = 1) {
+  if (!Object.prototype.hasOwnProperty.call(contadorSegundo, nombre)) return;
+  contadorSegundo[nombre] += cantidad;
+  metricas.total[nombre] += cantidad;
+}
+
+let siguienteTickMetricas = Date.now() + 1000;
+setInterval(() => {
+  // Event-loop lag proxy to detect runtime pressure.
+  const ahora = Date.now();
+  metricas.loopLagMs = Math.max(0, ahora - siguienteTickMetricas);
+  siguienteTickMetricas = ahora + 1000;
+
+  metricas.ultimoSegundo = {
+    marcadasEntrantes: contadorSegundo.marcadasEntrantes,
+    marcadasAceptadas: contadorSegundo.marcadasAceptadas,
+    marcadasEmitidasGestor: contadorSegundo.marcadasEmitidasGestor,
+    busquedasGestor: contadorSegundo.busquedasGestor,
+    busquedasRateLimited: contadorSegundo.busquedasRateLimited,
+  };
+
+  contadorSegundo.marcadasEntrantes = 0;
+  contadorSegundo.marcadasAceptadas = 0;
+  contadorSegundo.marcadasEmitidasGestor = 0;
+  contadorSegundo.busquedasGestor = 0;
+  contadorSegundo.busquedasRateLimited = 0;
+}, 1000).unref();
+
+function obtenerRateMarcadasMs() {
+  // Adaptive server-side pacing based on current online users.
+  const online = Object.keys(estado.jugadores).length;
+  if (online >= ONLINE_ALTA_THRESHOLD) return RATE_MARCADAS_ALTA_MS;
+  if (online >= ONLINE_MEDIA_THRESHOLD) return RATE_MARCADAS_MEDIA_MS;
+  return RATE_MARCADAS_BASE_MS;
+}
+
+function obtenerVentanaBatchMarcadasMs() {
+  // Batch window grows with load to reduce broadcast pressure.
+  const online = Object.keys(estado.jugadores).length;
+  if (online >= ONLINE_ALTA_THRESHOLD) return BATCH_MARCADAS_ALTA_MS;
+  if (online >= ONLINE_MEDIA_THRESHOLD) return BATCH_MARCADAS_MEDIA_MS;
+  return BATCH_MARCADAS_BASE_MS;
+}
+
+function limpiarColaMarcadasGestor() {
+  if (gestorMarcadasTimer) {
+    clearTimeout(gestorMarcadasTimer);
+    gestorMarcadasTimer = null;
+  }
+  gestorMarcadasPendientes.clear();
+}
+
+function programarMarcadasParaGestor(socketId, marcadas) {
+  // Keep only the latest state per player inside the current batch window.
+  gestorMarcadasPendientes.set(socketId, Array.isArray(marcadas) ? [...marcadas] : []);
+  if (gestorMarcadasTimer) return;
+
+  gestorMarcadasTimer = setTimeout(() => {
+    gestorMarcadasTimer = null;
+    if (!gestorMarcadasPendientes.size) return;
+
+    for (const [sid, marks] of gestorMarcadasPendientes.entries()) {
+      nsGestor.emit('partida:marcadas-actualizadas', { socketId: sid, marcadas: marks });
+      registrarMetrica('marcadasEmitidasGestor');
+    }
+    gestorMarcadasPendientes.clear();
+  }, obtenerVentanaBatchMarcadasMs());
 }
 
 // ─── Twitch OAuth ─────────────────────────────────────────────
@@ -696,12 +814,55 @@ expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
 });
 
 expressApp.get('/healthz', (_req, res) => {
-  res.status(200).json({
+  const online = Object.keys(estado.jugadores).length;
+  const mem = process.memoryUsage();
+  const response = {
     ok: true,
     ts: Date.now(),
-    jugadoresOnline: Object.keys(estado.jugadores).length,
+    jugadoresOnline: online,
     partidaActiva: estado.partidaActiva,
-  });
+  };
+
+  if (HEALTHZ_VERBOSE) {
+    const promedioBusquedaMs = metricas.total.busquedasResueltas
+      ? Number((metricas.total.busquedasMsAcumulados / metricas.total.busquedasResueltas).toFixed(2))
+      : 0;
+
+    response.metricas = {
+      uptimeSeg: Math.floor(process.uptime()),
+      loopLagMs: metricas.loopLagMs,
+      rssMb: Math.round(mem.rss / 1024 / 1024),
+      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+      authQueue: authQueue.length,
+      colaMarcadasPendientes: gestorMarcadasPendientes.size,
+      ratesActivos: {
+        marcadasMs: obtenerRateMarcadasMs(),
+        batchMarcadasMs: obtenerVentanaBatchMarcadasMs(),
+        busquedaGestorRateMs: BUSQUEDA_GESTOR_RATE_MS,
+      },
+      ultimoSegundo: metricas.ultimoSegundo,
+      acumulado: {
+        marcadasEntrantes: metricas.total.marcadasEntrantes,
+        marcadasAceptadas: metricas.total.marcadasAceptadas,
+        marcadasEmitidasGestor: metricas.total.marcadasEmitidasGestor,
+        busquedasGestor: metricas.total.busquedasGestor,
+        busquedasRateLimited: metricas.total.busquedasRateLimited,
+        promedioBusquedaMs,
+      },
+      configuracion: {
+        onlineMediaThreshold: ONLINE_MEDIA_THRESHOLD,
+        onlineAltaThreshold: ONLINE_ALTA_THRESHOLD,
+        rateMarcadasBaseMs: RATE_MARCADAS_BASE_MS,
+        rateMarcadasMediaMs: RATE_MARCADAS_MEDIA_MS,
+        rateMarcadasAltaMs: RATE_MARCADAS_ALTA_MS,
+        batchMarcadasBaseMs: BATCH_MARCADAS_BASE_MS,
+        batchMarcadasMediaMs: BATCH_MARCADAS_MEDIA_MS,
+        batchMarcadasAltaMs: BATCH_MARCADAS_ALTA_MS,
+      },
+    };
+  }
+
+  res.status(200).json(response);
 });
 
 expressApp.get('/', (req, res, next) => {
@@ -761,6 +922,7 @@ nsGestor.on('connection', (socket) => {
     estado.partidaActiva            = true;
     estado.partidaIniciadaTs        = Date.now();
     estado.discordCartonesNotificados = {};
+    limpiarColaMarcadasGestor();
     estado.reclamacionesHabilitadas = false;
     estado.umbralReclamo            = 0;
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
@@ -904,6 +1066,7 @@ nsGestor.on('connection', (socket) => {
     estado.partidaIniciadaTs = 0;
     estado.discordCartonesNotificados = {};
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
+    limpiarColaMarcadasGestor();
     nsJugador.emit('partida:nueva');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
@@ -911,6 +1074,17 @@ nsGestor.on('connection', (socket) => {
   });
 
   socket.on('gestor:buscar-jugadores', (payload) => {
+    const ahoraBusqueda = Date.now();
+    const rlBusquedaTs = rateLimitsBusquedaGestor[socket.id] || 0;
+    if (ahoraBusqueda - rlBusquedaTs < BUSQUEDA_GESTOR_RATE_MS) {
+      registrarMetrica('busquedasRateLimited');
+      if (DEBUG_BUSQUEDA) {
+        console.log(`[Busqueda] rate-limited socket=${socket.id} (${BUSQUEDA_GESTOR_RATE_MS}ms)`);
+      }
+      return;
+    }
+    rateLimitsBusquedaGestor[socket.id] = ahoraBusqueda;
+
     const raw = (payload && payload.q) ? String(payload.q) : '';
     const q = raw.trim().toLowerCase();
     const rawLimit = parseInt((payload || {}).limit, 10);
@@ -926,6 +1100,8 @@ nsGestor.on('connection', (socket) => {
       }
       return;
     }
+
+    registrarMetrica('busquedasGestor');
 
     if (DEBUG_BUSQUEDA) {
       console.log(`[Busqueda] recibida q="${q}" | requestId=${requestId} | online=${Object.keys(estado.jugadores).length}`);
@@ -987,6 +1163,9 @@ nsGestor.on('connection', (socket) => {
       totalResultados: resultados.length,
       jugadores: resultados,
     });
+
+    metricas.total.busquedasMsAcumulados += (Date.now() - ahoraBusqueda);
+    metricas.total.busquedasResueltas += 1;
 
     if (DEBUG_BUSQUEDA) {
       console.log(`[Busqueda] respondida q="${q}" | requestId=${requestId} | resultados=${resultados.length}`);
@@ -1107,6 +1286,7 @@ nsGestor.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    delete rateLimitsBusquedaGestor[socket.id];
     console.log('[Gestor] Desconectado:', socket.id);
   });
 });
@@ -1142,10 +1322,19 @@ nsJugador.on('connection', (socket) => {
       return;
     }
     if (!twUser) {
-      socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
-      return;
+      // Allow stress clients only when explicitly enabled via env var.
+      if (ALLOW_STRESS_BOTS) {
+        if (DEBUG_RECLAMOS) {
+          console.log(`[Stress] Bot permitido sin Twitch sid en socket ${socket.id}`);
+        }
+      } else {
+        socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
+        return;
+      }
     }
-    const twitchLogin = twUser.login;
+
+    // Keep a stable synthetic login per bot token when stress bypass is enabled.
+    const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
 
     const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
     /*
@@ -1185,7 +1374,7 @@ nsJugador.on('connection', (socket) => {
       ip,
       nombre:         nombreClean,
       twitch:         twitchLogin,
-      twitchVerified: true,
+      twitchVerified: !!twUser,
       carton,
       cantadoLinea:   cantadoLineaGuard,
       cantadoBingo:   cantadoBingoGuard,
@@ -1210,12 +1399,15 @@ nsJugador.on('connection', (socket) => {
     const jugador = estado.jugadores[socket.id];
     const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
+    registrarMetrica('marcadasEntrantes');
 
     // Rate limit de actualizaciones de marcadas por jugador
     const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
-    if (ahora - (rl.lastMarcadas || 0) < RATE_MARCADAS_MS) return;
+    const rateMarcadasMs = obtenerRateMarcadasMs();
+    if (ahora - (rl.lastMarcadas || 0) < rateMarcadasMs) return;
     rl.lastMarcadas = ahora;
     rateLimits[socket.id] = rl;
+    registrarMetrica('marcadasAceptadas');
 
     const cartonSet   = new Set(jugador.carton.flat());
     jugador.marcadas = marcadas
@@ -1225,7 +1417,7 @@ nsJugador.on('connection', (socket) => {
       estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
     }
     // Delta ligero: solo manda las marcadas actualizadas de este jugador
-    nsGestor.emit('partida:marcadas-actualizadas', { socketId: socket.id, marcadas: jugador.marcadas });
+    programarMarcadasParaGestor(socket.id, jugador.marcadas);
 
     // En modo compacto, refrescar periódicamente el top enviado a gestor/moderadores.
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
@@ -1237,7 +1429,7 @@ function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
     const cartonSet = new Set(jugador.carton.flat());
     jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
-    nsGestor.emit('partida:marcadas-actualizadas', { socketId: jugador.socketId, marcadas: jugador.marcadas });
+    programarMarcadasParaGestor(jugador.socketId, jugador.marcadas);
 
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
       scheduledGestorBroadcast();
@@ -1380,6 +1572,7 @@ function registrarFalloReclamo(jugador, socket) {
         estado.tokens[jugador.twitch].cantadoBingo = jugador.cantadoBingo;
       }
       if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
+      gestorMarcadasPendientes.delete(socket.id);
       delete estado.jugadores[socket.id];
       delete rateLimits[socket.id];
       scheduledGestorBroadcast();
