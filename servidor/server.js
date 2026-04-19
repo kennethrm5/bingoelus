@@ -78,6 +78,12 @@ const BATCH_MARCADAS_ALTA_MS = leerEnvInt('BATCH_MARCADAS_ALTA_MS', 280, BATCH_M
 const BUSQUEDA_GESTOR_RATE_MS = leerEnvInt('BUSQUEDA_GESTOR_RATE_MS', 140, 50, 3000);
 const HEALTHZ_VERBOSE = process.env.HEALTHZ_VERBOSE === '1';
 const ALLOW_STRESS_BOTS = process.env.ALLOW_STRESS_BOTS === '1';
+const DEBUG_TIMEOUTS = process.env.DEBUG_TIMEOUTS === '1';
+const SOCKET_IO_WEBSOCKET_ONLY = process.env.SOCKET_IO_WEBSOCKET_ONLY === '1';
+const SOCKET_IO_PING_INTERVAL_MS = leerEnvInt('SOCKET_IO_PING_INTERVAL_MS', 25000, 10000, 120000);
+const SOCKET_IO_PING_TIMEOUT_MS = leerEnvInt('SOCKET_IO_PING_TIMEOUT_MS', 30000, 5000, 180000);
+const SOCKET_IO_CONNECT_TIMEOUT_MS = leerEnvInt('SOCKET_IO_CONNECT_TIMEOUT_MS', 45000, 5000, 180000);
+const SOCKET_IO_UPGRADE_TIMEOUT_MS = leerEnvInt('SOCKET_IO_UPGRADE_TIMEOUT_MS', 30000, 5000, 120000);
 const STRIKES_MAX = 3;
 const STRIKE_COOLDOWN_SEG = 30;
 const DEBUG_BUSQUEDA = process.env.DEBUG_BUSQUEDA === '1';
@@ -595,12 +601,23 @@ const io = new Server(httpServer, {
     origin: true,
     credentials: true,
   },
-  // Preferir WebSocket: evita el doble round-trip de polling
-  transports: ['websocket', 'polling'],
-  // Reduce overhead de paquetes
-  pingInterval: 25000,
-  pingTimeout: 20000,
+  // Timeout-sensitive settings are configurable via env for production tuning.
+  transports: SOCKET_IO_WEBSOCKET_ONLY ? ['websocket'] : ['websocket', 'polling'],
+  pingInterval: SOCKET_IO_PING_INTERVAL_MS,
+  pingTimeout: SOCKET_IO_PING_TIMEOUT_MS,
+  connectTimeout: SOCKET_IO_CONNECT_TIMEOUT_MS,
+  upgradeTimeout: SOCKET_IO_UPGRADE_TIMEOUT_MS,
 });
+
+if (DEBUG_TIMEOUTS) {
+  // Capture low-level handshake failures when tracking timeout issues.
+  io.engine.on('connection_error', (err) => {
+    const code = err && typeof err.code !== 'undefined' ? err.code : 'sin_codigo';
+    const message = err && err.message ? err.message : 'sin_mensaje';
+    const transport = err && err.context && err.context.transport ? err.context.transport : 'desconocido';
+    console.log(`[TimeoutDebug] connection_error code=${code} transport=${transport} msg=${message}`);
+  });
+}
 
 expressApp.disable('x-powered-by');
 // Gzip en todas las respuestas HTTP (reduce ancho de banda ~70%)
@@ -1285,7 +1302,13 @@ nsGestor.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    if (DEBUG_TIMEOUTS) {
+      const transportName = socket.conn && socket.conn.transport && socket.conn.transport.name
+        ? socket.conn.transport.name
+        : 'desconocido';
+      console.log(`[TimeoutDebug] Gestor disconnect sid=${socket.id} reason=${reason || 'sin_razon'} transport=${transportName}`);
+    }
     delete rateLimitsBusquedaGestor[socket.id];
     console.log('[Gestor] Desconectado:', socket.id);
   });
@@ -1294,6 +1317,13 @@ nsGestor.on('connection', (socket) => {
 // ── Namespace Jugador ─────────────────────────────────────────
 nsJugador.on('connection', (socket) => {
   console.log('[Jugador] Conectado:', socket.id);
+
+  if (DEBUG_TIMEOUTS) {
+    const transportName = socket.conn && socket.conn.transport && socket.conn.transport.name
+      ? socket.conn.transport.name
+      : 'desconocido';
+    console.log(`[TimeoutDebug] Jugador connect sid=${socket.id} transport=${transportName}`);
+  }
 
   const twCookies = parseCookies(socket.handshake.headers.cookie || '');
   const twUser    = twCookies.twitch_sid ? twitchSessions.get(twCookies.twitch_sid) : null;
@@ -1562,8 +1592,15 @@ function registrarFalloReclamo(jugador, socket) {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     const jugador = estado.jugadores[socket.id];
+    if (DEBUG_TIMEOUTS) {
+      const transportName = socket.conn && socket.conn.transport && socket.conn.transport.name
+        ? socket.conn.transport.name
+        : 'desconocido';
+      const nombre = jugador && jugador.nombre ? jugador.nombre : 'sin_nombre';
+      console.log(`[TimeoutDebug] Jugador disconnect sid=${socket.id} nombre=${nombre} reason=${reason || 'sin_razon'} transport=${transportName}`);
+    }
     if (jugador) {
       console.log(`[Servidor] ${jugador.nombre} (@${jugador.twitch}) se desconectó.`);
       if (estado.tokens[jugador.twitch]) {
@@ -1584,6 +1621,11 @@ function registrarFalloReclamo(jugador, socket) {
 
 httpServer.listen(PORT, () => {
   console.log(`[Servidor] Escuchando en http://localhost:${PORT}`);
+  console.log(
+    `[Servidor] Socket.IO pingInterval=${SOCKET_IO_PING_INTERVAL_MS}ms pingTimeout=${SOCKET_IO_PING_TIMEOUT_MS}ms ` +
+    `connectTimeout=${SOCKET_IO_CONNECT_TIMEOUT_MS}ms upgradeTimeout=${SOCKET_IO_UPGRADE_TIMEOUT_MS}ms websocketOnly=${SOCKET_IO_WEBSOCKET_ONLY}`
+  );
+  if (DEBUG_TIMEOUTS) console.log('[Servidor] Timeout debug logs activados (DEBUG_TIMEOUTS=1).');
   if (cfg.baseUrl) console.log(`[Servidor] URL pública configurada: ${cfg.baseUrl}`);
   else console.log('[Servidor] Sin baseUrl configurada (Twitch OAuth no funcionará). Añade baseUrl en config.json.');
 });
