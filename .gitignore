@@ -6,7 +6,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 twitch.config.json
-frases.txt
 servidor/public/reglas.txt
 
 # Secrets y configuraci�n local
@@ -18,5 +17,4 @@ config.json
 # Archivos de empaquetado y tests
 *.exe
 resultados-*
-logs.txt
-pm2.txt
+*.txt
