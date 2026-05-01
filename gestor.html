@@ -6,6 +6,7 @@
   <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />
   <title>Bingoelus — Gestor</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
     /* ── Reset & Variables ─────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -20,14 +21,21 @@
       --warn:      #fb923c;
       --text:      #fdf6d8;
       --muted:     #9a8040;
+      --border:    #3d3500;
+      --border-2:  #4a3a00;
       --radius:    10px;
       --shadow:    0 4px 24px rgba(0,0,0,.65);
+      --font-ui:   'Manrope', system-ui, sans-serif;
+      --font-title:'Space Grotesk', 'Manrope', system-ui, sans-serif;
     }
 
     body {
-      background: var(--bg);
+      background:
+        radial-gradient(1200px 700px at 85% -220px, rgba(245,184,0,.12), transparent 60%),
+        radial-gradient(900px 600px at 10% 20%, rgba(255,212,77,.08), transparent 55%),
+        var(--bg);
       color: var(--text);
-      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-family: var(--font-ui);
       font-size: 14px;
       height: 100vh;
       overflow: hidden;
@@ -42,10 +50,15 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-bottom: 1px solid #3d3500;
+      border-bottom: 1px solid var(--border);
       box-shadow: var(--shadow);
     }
-    header h1 { font-size: 1.4rem; color: var(--accent-h); letter-spacing: .05em; }
+    header h1 {
+      font-size: 1.4rem;
+      color: var(--accent-h);
+      letter-spacing: .05em;
+      font-family: var(--font-title);
+    }
     #url-publica {
       background: var(--surface2);
       border: 1px solid var(--accent);
@@ -78,8 +91,8 @@
     /* ── Layout principal ──────────────────────────────────── */
     main {
       display: grid;
-      grid-template-columns: 340px 1fr;
-      grid-template-rows: auto 1fr 1fr;
+      grid-template-columns: minmax(320px, 420px) minmax(520px, 1fr);
+      grid-template-rows: 1fr;
       gap: 16px;
       padding: 16px;
       flex: 1;
@@ -87,33 +100,52 @@
       overflow: hidden;
     }
 
+    #col-izq,
+    #col-der {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+    }
+
     /* ── Panel izquierdo (configuración) ────────── */
     #panel-izq {
       display: flex;
       flex-direction: column;
       gap: 14px;
-      grid-row: 1 / 3;
       min-height: 0;
       overflow-y: auto;
     }
 
-    /* Música: fila 1, columna 2 */
-    #card-musica { grid-column: 2; grid-row: 1; }
-
-    /* Cartones: fila 2, columna 2 */
-    #panel-cartones { grid-column: 2; grid-row: 2; min-height: 0; }
-
-    /* Log: fila 3, columna 1 (debajo de config) */
-    #panel-log { grid-column: 1; grid-row: 3; min-height: 0; }
-
-    /* Frases: fila 3, columna 2 */
-    #card-frases { grid-column: 2; grid-row: 3; display: flex; flex-direction: column; overflow: hidden; }
+    #card-frases {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex: 1;
+      min-height: 0;
+    }
 
     .card {
       background: var(--surface);
       border-radius: var(--radius);
       padding: 16px;
-      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+    }
+    .lux-panel {
+      background: linear-gradient(135deg, rgba(245,184,0,.12), rgba(0,0,0,0) 45%), var(--surface);
+      border: 1px solid var(--border-2);
+      box-shadow: 0 12px 30px rgba(0,0,0,.55);
+      position: relative;
+    }
+    .lux-panel::after {
+      content: '';
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(245,184,0,.35), transparent);
+      opacity: .7;
     }
     .card h2 {
       font-size: .95rem;
@@ -127,7 +159,7 @@
       width: 100%;
       height: 130px;
       background: var(--bg);
-      border: 1px solid #3d3500;
+      border: 1px solid var(--border);
       border-radius: 7px;
       color: var(--text);
       font-size: .85rem;
@@ -155,6 +187,31 @@
     button.primary:active { transform: scale(.97); }
     button.danger  { background: var(--danger); color: #fff; }
     button.danger:hover  { background: #f87171; }
+
+    .acciones-partida {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .acciones-partida .primary {
+      margin-top: 0;
+      flex: 1;
+    }
+    .setup-only.is-hidden {
+      display: none !important;
+    }
+    #card-config.compacto {
+      padding: 12px;
+    }
+    #card-config.compacto h2 {
+      margin-bottom: 6px;
+    }
+    #card-config.compacto #btn-reclamaciones {
+      margin-top: 6px;
+    }
+    #card-config.compacto .acciones-partida {
+      gap: 6px;
+    }
 
     /* Lista de frases cantables */
     #lista-frases {
@@ -191,12 +248,14 @@
 
     /* ── Panel derecho arriba (jugadores) ──────────────────── */
     #panel-cartones {
-      background: var(--surface);
       border-radius: var(--radius);
       padding: 16px;
       min-height: 0;
-      overflow-y: auto;
-      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
     }
     #ganadores-header { font-size: .78rem; font-weight: 400; }
     #ganadores-header .ganador-linea { color: var(--warn); margin-left: 6px; }
@@ -222,6 +281,10 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
     }
     .jugador-fila {
       background: var(--surface2);
@@ -348,37 +411,6 @@
     .badge-linea { background: var(--warn);    color: #000; }
     .badge-bingo { background: var(--success); color: #000; }
 
-    /* ── Log de eventos (lateral izquierdo, fila 3) ─────────── */
-    #panel-log {
-      background: var(--surface);
-      border-radius: var(--radius);
-      padding: 16px;
-      box-shadow: var(--shadow);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    #panel-log h2 {
-      font-size: .95rem;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    #log-eventos {
-      flex: 1;
-      overflow-y: auto;
-      font-size: .8rem;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .log-item { padding: 4px 8px; border-radius: 5px; background: var(--bg); }
-    .log-item.ok     { color: var(--success); }
-    .log-item.warn   { color: var(--warn); }
-    .log-item.error  { color: var(--danger); }
-    .log-item.info   { color: var(--muted); }
-
     /* ── Alerta de premio ─────────────────────────────────── */
     #overlay-premio {
       display: none;
@@ -418,49 +450,180 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #3d3500; border-radius: 3px; }
 
-    /* ── Tarjeta de música (inline: título + controles en la misma fila) ─ */
-    #card-musica {
+    /* ── Control premium de música ─ */
+    .music-controller {
       display: flex;
       flex-direction: row;
       align-items: center;
       gap: 14px;
-      padding: 10px 16px;
+      padding: 10px 14px;
     }
-    #card-musica h2 { margin: 0; white-space: nowrap; flex-shrink: 0; }
-    #card-musica .controles-musica {
+    #card-musica {
+      align-self: stretch;
+      width: 100%;
+    }
+    #card-musica #yt-player {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .music-title {
       display: flex;
-      gap: 6px;
-      flex-wrap: nowrap;
+      align-items: center;
+      gap: 10px;
+      padding-right: 12px;
+      border-right: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .music-icon {
+      font-size: 1.05rem;
+      color: var(--accent-h);
+    }
+    .music-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+    .music-label {
+      font-family: var(--font-title);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      font-size: .7rem;
+      color: var(--accent-h);
+    }
+    .music-sub {
+      font-size: .72rem;
+      color: var(--muted);
+    }
+    .music-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
       align-items: center;
       margin-top: 0;
+      flex: 1;
+      justify-content: flex-end;
     }
-    #card-musica button {
+    .music-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .volume-group {
+      padding: 4px 6px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid var(--border);
+    }
+    .lux-btn {
       padding: 6px 12px;
-      border: none;
-      border-radius: 6px;
-      background: var(--surface2);
+      border: 1px solid var(--border-2);
+      border-radius: 999px;
+      background: linear-gradient(180deg, #2b2505, #1a1400);
       color: var(--text);
       cursor: pointer;
-      font-size: .82rem;
-      border: 1px solid #3d3500;
-      transition: background .15s;
+      font-size: .8rem;
+      transition: transform .12s, background .15s, border-color .15s, color .15s;
+      box-shadow: inset 0 0 0 1px rgba(255,214,77,.08);
+      white-space: nowrap;
     }
-    #card-musica button:hover { background: var(--accent); border-color: var(--accent); color: #000; }
-    #lbl-vol { color: var(--muted); font-size: .82rem; min-width: 40px; text-align: center; }
-    #btn-claxon {
-      width: 100%;
-      margin-top: 8px;
-      padding: 9px;
-      border: none;
-      border-radius: 7px;
-      background: #92400e;
-      color: #fde68a;
-      font-size: .88rem;
+    .lux-btn:hover {
+      background: linear-gradient(180deg, #3a3008, #241b00);
+      border-color: var(--accent);
+      color: #000;
+    }
+    .lux-btn:active { transform: translateY(1px); }
+    .music-controls .claxon-btn { margin-left: auto; }
+    .claxon-btn.lux-btn {
+      background: linear-gradient(180deg, #9a3d0e, #6b2a00);
+      border-color: #b45309;
+      color: #fff1c2;
       font-weight: 700;
-      cursor: pointer;
-      transition: background .2s;
     }
-    #btn-claxon:hover { background: #b45309; }
+    .claxon-btn.lux-btn:hover {
+      background: linear-gradient(180deg, #b45309, #7a2f00);
+      color: #000;
+    }
+    #vol-slider,
+    #ovl-vol-slider {
+      appearance: none;
+      width: 120px;
+      height: 6px;
+      border-radius: 999px;
+      background: #2a2300;
+      outline: none;
+      border: 1px solid var(--border);
+    }
+    #vol-slider::-webkit-slider-thumb,
+    #ovl-vol-slider::-webkit-slider-thumb {
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid #000;
+      box-shadow: 0 0 0 2px rgba(245,184,0,.25);
+    }
+    #vol-slider::-moz-range-thumb,
+    #ovl-vol-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid #000;
+      box-shadow: 0 0 0 2px rgba(245,184,0,.25);
+    }
+    #lbl-vol,
+    #ovl-lbl-vol {
+      color: var(--accent-h);
+      font-size: .75rem;
+      min-width: 46px;
+      text-align: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(245,184,0,.08);
+      border: 1px solid var(--border);
+    }
+
+    .panel-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .panel-title-row h2 { margin-bottom: 0; }
+
+    .input-control {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: .85rem;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .input-control:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(245,184,0,.15);
+    }
+    .input-compact { width: 220px; }
+    .input-full { width: 100%; }
+
+    #card-frases { gap: 10px; }
+
+    @media (max-width: 1100px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+      }
+      #col-izq { grid-column: 1; grid-row: 1; }
+      #col-der { grid-column: 1; grid-row: 2; }
+      .input-compact { width: 100%; }
+    }
 
     /* ── Overlay de conexión al servidor ──────────────── */
     #overlay-conexion {
@@ -501,27 +664,12 @@
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
       z-index: 1001;
-      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      width: min(980px, 92vw);
     }
-    #overlay-musica button {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 5px 10px;
-      cursor: pointer;
-      font-size: .9rem;
-      transition: background .15s;
+    #overlay-musica.music-controller {
+      padding: 8px 12px;
     }
-    #overlay-musica button:hover { background: var(--accent); }
   </style>
 </head>
 <body>
@@ -538,13 +686,27 @@
     <p id="connect-error" style="color:var(--danger);min-height:1.2em;"></p>
   </div>
   <!-- Control de música en el overlay para que Joelus no se quede sordo -->
-  <div id="overlay-musica">
-    <span style="font-size:.85rem;opacity:.7;">🎵 Música</span>
-    <button id="ovl-btn-play">▶</button>
-    <button id="ovl-btn-pause">⏸</button>
-    <button id="ovl-btn-vol-down">🔉</button>
-    <span id="ovl-lbl-vol">50%</span>
-    <button id="ovl-btn-vol-up">🔊</button>
+  <div id="overlay-musica" class="music-controller lux-panel">
+    <div class="music-title">
+      <span class="music-icon">🎵</span>
+      <div class="music-text">
+        <div class="music-label">Música de fondo</div>
+        <div class="music-sub">Control maestro</div>
+      </div>
+    </div>
+    <div class="music-controls">
+      <div class="music-group">
+        <button id="ovl-btn-play" class="lux-btn">▶ Reanudar</button>
+        <button id="ovl-btn-pause" class="lux-btn">⏸ Pausar</button>
+      </div>
+      <div class="music-group volume-group">
+        <button id="ovl-btn-vol-down" class="lux-btn">🔉</button>
+        <input type="range" id="ovl-vol-slider" min="0" max="100" value="50" />
+        <span id="ovl-lbl-vol">50%</span>
+        <button id="ovl-btn-vol-up" class="lux-btn">🔊</button>
+      </div>
+      <button id="ovl-btn-claxon" class="lux-btn claxon-btn">📯 Claxon</button>
+    </div>
   </div>
 </div>
 
@@ -564,18 +726,22 @@
 
 <!-- ═══════════════ MAIN ═══════════════ -->
 <main>
-  <!-- ── Panel izquierdo (configuración) ── -->
-  <aside id="panel-izq">
+  <div id="col-izq">
+    <!-- ── Panel izquierdo (configuración) ── -->
+    <aside id="panel-izq">
 
     <!-- Configurar partida -->
-    <div class="card" id="card-config">
+    <div class="card lux-panel" id="card-config">
       <h2>⚙️ Configurar Partida</h2>
       <textarea
         id="input-frases"
+        class="setup-only"
         placeholder="Escribe las frases separadas por comas o saltos de línea.&#10;Mínimo 25 frases para un cartón 5×5.&#10;&#10;Ejemplo:&#10;Le llegó el cuento,&#10;Tenía el pelo negro,&#10;..."
       ></textarea>
-      <button class="primary" id="btn-iniciar">▶ Iniciar Partida</button>
-      <button class="primary danger" id="btn-resetear" style="margin-top:6px">🔄 Resetear Todo</button>
+      <div class="acciones-partida">
+        <button class="primary setup-only" id="btn-iniciar">▶ Iniciar Partida</button>
+        <button class="primary danger" id="btn-resetear">🔄 Resetear Todo</button>
+      </div>
       <button id="btn-reclamaciones" class="off">🔒 Habilitar Reclamaciones (desactivado)</button>
       <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <label for="input-umbral" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">Casillas restantes máx. para ¡Bingo!:</label>
@@ -583,47 +749,56 @@
           style="width:58px;background:var(--bg);border:1px solid #3d3500;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
         <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#000;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
       </div>
-      <button id="btn-claxon">📯 Tocar Claxon</button>
     </div>
 
-  </aside>
+    </aside>
 
-  <!-- ── Música de fondo (encima de los cartones) ── -->
-  <div class="card" id="card-musica">
-    <h2>🎵 Música de Fondo</h2>
-    <div id="yt-player"></div>
-    <div class="controles-musica">
-      <button id="btn-musica-play">▶ Reanudar</button>
-      <button id="btn-musica-pause">⏸ Pausar</button>
-      <button id="btn-vol-down">🔉</button>
-      <span id="lbl-vol">50%</span>
-      <button id="btn-vol-up">🔊</button>
+    <!-- ── Lista de frases cantables (lado izquierdo) ── -->
+    <div class="card lux-panel" id="card-frases">
+      <h2>📣 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
+      <input type="text" id="buscador-frases" class="input-control input-full" placeholder="🔍 Buscar frase..." />
+      <div id="lista-frases">
+        <p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>
+      </div>
     </div>
   </div>
 
-  <!-- ── Jugadores (acordeón) ── -->
-  <section id="panel-cartones">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-      <h2 style="margin-bottom: 0;">👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
-      <input type="text" id="buscador-jugadores" placeholder="Buscar jugador..." style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 220px; font-size: 0.9rem;">
+  <div id="col-der">
+    <!-- ── Música de fondo + Claxon ── -->
+    <div class="card lux-panel music-controller" id="card-musica">
+      <div class="music-title">
+        <span class="music-icon">🎵</span>
+        <div class="music-text">
+          <div class="music-label">Música de fondo</div>
+          <div class="music-sub">Control maestro</div>
+        </div>
+      </div>
+      <div id="yt-player"></div>
+      <div class="music-controls">
+        <div class="music-group">
+          <button id="btn-musica-play" class="lux-btn">▶ Reanudar</button>
+          <button id="btn-musica-pause" class="lux-btn">⏸ Pausar</button>
+        </div>
+        <div class="music-group volume-group">
+          <button id="btn-vol-down" class="lux-btn">🔉</button>
+          <input type="range" id="vol-slider" min="0" max="100" value="50" />
+          <span id="lbl-vol">50%</span>
+          <button id="btn-vol-up" class="lux-btn">🔊</button>
+        </div>
+        <button id="btn-claxon" class="lux-btn claxon-btn">📯 Claxon</button>
+      </div>
     </div>
-    <div id="lista-jugadores">
-      <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
-    </div>
-  </section>
 
-  <!-- ── Log de eventos ── -->
-  <section id="panel-log">
-    <h2>📋 Registro de Eventos</h2>
-    <div id="log-eventos"></div>
-  </section>
-
-  <!-- ── Lista de frases cantables (ancho completo, debajo) ── -->
-  <div class="card" id="card-frases">
-    <h2>📣 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
-    <div id="lista-frases">
-      <p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>
-    </div>
+    <!-- ── Jugadores (acordeón) ── -->
+    <section id="panel-cartones" class="lux-panel">
+      <div class="panel-title-row" style="margin-bottom: 12px;">
+        <h2>👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
+        <input type="text" id="buscador-jugadores" class="input-control input-compact" placeholder="🔍 Buscar jugador...">
+      </div>
+      <div id="lista-jugadores">
+        <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
+      </div>
+    </section>
   </div>
 
 </main>
@@ -706,7 +881,13 @@
   const numJugadores    = document.getElementById('num-jugadores');
   const listaJugadores  = document.getElementById('lista-jugadores');
   const buscadorJugadoresEl = document.getElementById('buscador-jugadores');
+  const buscadorFrasesEl = document.getElementById('buscador-frases');
+  const volSlider      = document.getElementById('vol-slider');
+  const ovlVolSlider   = document.getElementById('ovl-vol-slider');
+  const btnOvlClaxon   = document.getElementById('ovl-btn-claxon');
   const logEventos      = document.getElementById('log-eventos');
+  const setupOnlyEls    = Array.from(document.querySelectorAll('.setup-only'));
+  const cardConfig     = document.getElementById('card-config');
   const overlayPremio   = document.getElementById('overlay-premio');
   const overlayTipo     = document.getElementById('overlay-tipo');
   const overlayGanador  = document.getElementById('overlay-ganador');
@@ -774,9 +955,8 @@
       },
       events: {
         onReady: function (e) {
-          e.target.setVolume(ytVolumen);
           e.target.unMute();
-          document.getElementById('lbl-vol').textContent = ytVolumen + '%';
+          ytSetVol(ytVolumen);
         },
       },
     });
@@ -787,6 +967,8 @@
     const txt = ytVolumen + '%';
     document.getElementById('lbl-vol').textContent     = txt;
     document.getElementById('ovl-lbl-vol').textContent = txt;
+    if (volSlider) volSlider.value = String(ytVolumen);
+    if (ovlVolSlider) ovlVolSlider.value = String(ytVolumen);
     if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(ytVolumen);
   }
 
@@ -798,6 +980,18 @@
   });
   document.getElementById('btn-vol-up').addEventListener('click', () => ytSetVol(ytVolumen + 10));
   document.getElementById('btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
+  if (volSlider) {
+    volSlider.addEventListener('input', (ev) => {
+      const v = parseInt(ev.target.value, 10);
+      ytSetVol(Number.isFinite(v) ? v : 0);
+    });
+  }
+  if (ovlVolSlider) {
+    ovlVolSlider.addEventListener('input', (ev) => {
+      const v = parseInt(ev.target.value, 10);
+      ytSetVol(Number.isFinite(v) ? v : 0);
+    });
+  }
 
   // Controles del overlay (misma lógica, sincronizan con los del panel principal)
   document.getElementById('ovl-btn-play').addEventListener('click', () => {
@@ -808,6 +1002,9 @@
   });
   document.getElementById('ovl-btn-vol-up').addEventListener('click',   () => ytSetVol(ytVolumen + 10));
   document.getElementById('ovl-btn-vol-down').addEventListener('click', () => ytSetVol(ytVolumen - 10));
+  if (btnOvlClaxon) {
+    btnOvlClaxon.addEventListener('click', () => reproducirClaxon());
+  }
 
   // ── Claxon mp3 ─────────────────────────────────────────────
   const audioClaxon = new Audio('/media/claxon.mp3');
@@ -822,6 +1019,7 @@
   // ── Helpers de UI ─────────────────────────────────────
 
   function agregarLog(msg, tipo = 'info') {
+    if (!logEventos) return;
     const item = document.createElement('div');
     item.className = `log-item ${tipo}`;
     const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -970,8 +1168,13 @@
     }
   }
 
+  function actualizarUIEstadoPartida(activa) {
+    setupOnlyEls.forEach(el => el.classList.toggle('is-hidden', activa));
+    if (cardConfig) cardConfig.classList.toggle('compacto', activa);
+  }
+
   // ── Renderizar lista de frases (panel izquierdo) ───────
-  function renderizarFrases(frases, cantadas) {
+  function renderizarFrases(frases, cantadas, filtro = '') {
     listaFrases.innerHTML = '';
     const cantadasSet = new Set(cantadas);
     contCantadas.textContent = cantadas.length;
@@ -988,7 +1191,18 @@
       return clean(a).localeCompare(clean(b), 'es', { sensitivity: 'base' });
     });
 
-    frasesOrdenadas.forEach(frase => {
+    // Filtrar por término de búsqueda si existe
+    const filtroLower = filtro.toLowerCase().trim();
+    const frasesFiltradas = filtroLower
+      ? frasesOrdenadas.filter(frase => frase.toLowerCase().includes(filtroLower))
+      : frasesOrdenadas;
+
+    if (frasesFiltradas.length === 0 && filtroLower) {
+      listaFrases.innerHTML = '<p style="color:var(--muted);font-size:.82rem;">No hay frases que coincidan con tu búsqueda.</p>';
+      return;
+    }
+
+    frasesFiltradas.forEach(frase => {
       const wrapper = document.createElement('div');
       wrapper.style.cssText = 'display:flex;gap:4px;align-items:center;';
 
@@ -1224,6 +1438,29 @@
 
   enlazarEventosBuscadorJugadores();
 
+  // ── Filtrador de frases ──────────────────────────────────
+  function aplicarFiltroFrases() {
+    if (!buscadorFrasesEl) return;
+    const termino = buscadorFrasesEl.value.trim();
+    renderizarFrases(estadoLocal.frases, estadoLocal.cantadas, termino);
+  }
+
+  function enlazarEventosBuscadorFrases() {
+    if (!buscadorFrasesEl) return;
+    const disparar = (ev) => {
+      if (ev && ev.type === 'paste') {
+        setTimeout(() => aplicarFiltroFrases(), 0);
+        return;
+      }
+      aplicarFiltroFrases();
+    };
+    ['input', 'keyup', 'change', 'paste'].forEach(evt => {
+      buscadorFrasesEl.addEventListener(evt, disparar);
+    });
+  }
+
+  enlazarEventosBuscadorFrases();
+
   // ── Actualizar toda la UI con un estado completo ───────
   function actualizarGanadoresHeader() {
     const ganLinea = estadoLocal.jugadores.filter(j => j.cantadoLinea).map(j =>
@@ -1242,7 +1479,8 @@
 
   function aplicarEstado(nuevoEstado) {
     estadoLocal = { ...estadoLocal, ...nuevoEstado };
-    renderizarFrases(estadoLocal.frases, estadoLocal.cantadas);
+    actualizarUIEstadoPartida(Boolean(estadoLocal.partidaActiva));
+    renderizarFrases(estadoLocal.frases, estadoLocal.cantadas, buscadorFrasesEl ? buscadorFrasesEl.value : '');
     if (estadoLocal.modo !== 'compacto') estadoLocal.jugadoresBusqueda = null;
     renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
     actualizarGanadoresHeader();
@@ -1298,7 +1536,7 @@
     // Frase descantada por el gestor
   socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
     estadoLocal.cantadas = cantadas;
-    renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarFrases(estadoLocal.frases, cantadas, buscadorFrasesEl ? buscadorFrasesEl.value : '');
     renderizarCartones(obtenerJugadoresParaRender(), cantadas);
     agregarLog(`Descantada: "${frase}"`, 'warn');
   });
@@ -1314,7 +1552,7 @@
   // Frase cantada por el gestor
   socket.on('partida:frase-cantada', ({ frase, cantadas }) => {
     estadoLocal.cantadas = cantadas;
-    renderizarFrases(estadoLocal.frases, cantadas);
+    renderizarFrases(estadoLocal.frases, cantadas, buscadorFrasesEl ? buscadorFrasesEl.value : '');
     renderizarCartones(obtenerJugadoresParaRender(), cantadas);
     agregarLog(`Cantada: "${frase}"`, 'warn');
   });
@@ -1442,6 +1680,8 @@
     }
 
     socket.emit('gestor:iniciar-partida', { frases });
+    estadoLocal.partidaActiva = true;
+    actualizarUIEstadoPartida(true);
     agregarLog(`Partida iniciada con ${frases.length} frases.`, 'ok');
   });
 
@@ -1449,6 +1689,8 @@
     if (confirm('¿Seguro que quieres resetear la partida? Se borrarán todos los datos.')) {
       socket.emit('gestor:resetear');
       inputFrases.value = '';
+      estadoLocal.partidaActiva = false;
+      actualizarUIEstadoPartida(false);
       agregarLog('Partida reseteada.', 'warn');
     }
   });
