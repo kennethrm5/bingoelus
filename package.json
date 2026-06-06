@@ -1,6 +1,6 @@
 {
   "name": "bingoelus",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Juego de bingo personalizado con frases - gestor Electron, jugadores por navegador",
   "author": "@kennethrm5",
   "main": "main.js",
