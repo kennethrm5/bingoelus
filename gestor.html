@@ -411,6 +411,30 @@
     .badge-linea { background: var(--warn);    color: #000; }
     .badge-bingo { background: var(--success); color: #000; }
 
+    .jugador-acciones {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .btn-declarar-ganador {
+      padding: 6px 12px;
+      font-size: .78rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #000;
+    }
+    .btn-declarar-ganador.linea { background: var(--warn); }
+    .btn-declarar-ganador.bingo { background: var(--success); }
+    .btn-declarar-ganador:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
     /* ── Alerta de premio ─────────────────────────────────── */
     #overlay-premio {
       display: none;
@@ -1381,6 +1405,42 @@
       });
 
       inner.appendChild(grid);
+
+      if (estadoLocal.partidaActiva) {
+        const acciones = document.createElement('div');
+        acciones.className = 'jugador-acciones';
+
+        if (!j.cantadoLinea) {
+          const btnLinea = document.createElement('button');
+          btnLinea.type = 'button';
+          btnLinea.className = 'btn-declarar-ganador linea';
+          btnLinea.textContent = '🎉 Declarar LÍNEA';
+          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
+          btnLinea.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (!confirm(`¿Declarar LÍNEA para ${j.nombre}?`)) return;
+            socket.emit('gestor:declarar-linea', { socketId: j.socketId });
+          });
+          acciones.appendChild(btnLinea);
+        }
+
+        if (!j.cantadoBingo) {
+          const btnBingo = document.createElement('button');
+          btnBingo.type = 'button';
+          btnBingo.className = 'btn-declarar-ganador bingo';
+          btnBingo.textContent = '🏆 Declarar BINGO';
+          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
+          btnBingo.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (!confirm(`¿Declarar BINGO para ${j.nombre}?`)) return;
+            socket.emit('gestor:declarar-bingo', { socketId: j.socketId });
+          });
+          acciones.appendChild(btnBingo);
+        }
+
+        if (acciones.childElementCount > 0) inner.appendChild(acciones);
+      }
+
       panelCarton.appendChild(inner);
 
       fila.appendChild(cabecera);
@@ -1615,8 +1675,9 @@
   });
 
   // Línea válida
-  socket.on('partida:linea-valida', ({ ganador, twitch }) => {
-    agregarLog(`🎉 ¡LÍNEA! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}`, 'ok');
+  socket.on('partida:linea-valida', ({ ganador, twitch, manual }) => {
+    const sufijoManual = manual ? ' (declarada manualmente)' : '';
+    agregarLog(`🎉 ¡LÍNEA! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}${sufijoManual}`, 'ok');
     reproducirClaxon(false);
     mostrarOverlay('linea', ganador, twitch);
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
@@ -1629,8 +1690,9 @@
   });
 
   // Bingo válido
-  socket.on('partida:bingo-valido', ({ ganador, twitch }) => {
-    agregarLog(`🏆 ¡BINGO! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}. El gestor decide si continuar.`, 'ok');
+  socket.on('partida:bingo-valido', ({ ganador, twitch, manual }) => {
+    const sufijoManual = manual ? ' (declarado manualmente)' : '';
+    agregarLog(`🏆 ¡BINGO! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}${sufijoManual}. El gestor decide si continuar.`, 'ok');
     reproducirClaxon(true);
     mostrarOverlay('bingo', ganador, twitch);
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);

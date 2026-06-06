@@ -292,6 +292,129 @@ function validarBingo(carton, cantadas, marcadas, umbral) {
   return sinCompletar <= umbral;
 }
 
+function resolverJugadorGestor(socketId) {
+  if (!socketId || typeof socketId !== 'string') return null;
+
+  const online = estado.jugadores[socketId];
+  if (online) {
+    return { jugador: online, socketId, online: true, twitchLogin: online.twitch };
+  }
+
+  const prefijoOffline = 'offline-';
+  if (socketId.startsWith(prefijoOffline)) {
+    const twitchLogin = socketId.slice(prefijoOffline.length);
+    const datos = estado.tokens[twitchLogin];
+    if (!datos || !datos.nombre) return null;
+    return {
+      jugador: {
+        nombre: datos.nombre,
+        twitch: twitchLogin,
+        socketId,
+        carton: datos.carton,
+        cantadoLinea: !!datos.cantadoLinea,
+        cantadoBingo: !!datos.cantadoBingo,
+        marcadas: datos.marcadas || [],
+      },
+      socketId,
+      online: false,
+      twitchLogin,
+      datosToken: datos,
+    };
+  }
+  return null;
+}
+
+function sincronizarGanadorEnTokens(resuelto, campo) {
+  const twitchLogin = resuelto.twitchLogin;
+  if (!twitchLogin || !estado.tokens[twitchLogin]) return;
+  if (resuelto.online) {
+    estado.tokens[twitchLogin][campo] = estado.jugadores[resuelto.socketId][campo];
+  } else if (resuelto.datosToken) {
+    estado.tokens[twitchLogin][campo] = resuelto.datosToken[campo];
+  }
+}
+
+function declararLineaManual(socketId) {
+  const resuelto = resolverJugadorGestor(socketId);
+  if (!resuelto) return { ok: false, msg: 'Jugador no encontrado.' };
+  if (!estado.partidaActiva) return { ok: false, msg: 'No hay partida activa.' };
+  if (estado.bingoGanado) return { ok: false, msg: 'La partida ya ha terminado.' };
+
+  const { jugador } = resuelto;
+  if (jugador.cantadoLinea) return { ok: false, msg: 'Este jugador ya tiene línea.' };
+
+  if (resuelto.online) {
+    estado.jugadores[resuelto.socketId].cantadoLinea = true;
+    jugador.cantadoLinea = true;
+  } else {
+    resuelto.datosToken.cantadoLinea = true;
+    jugador.cantadoLinea = true;
+  }
+  sincronizarGanadorEnTokens(resuelto, 'cantadoLinea');
+
+  estado.lineaGanada = true;
+  estado.reclamacionesHabilitadas = false;
+
+  const payload = {
+    ganador: jugador.nombre,
+    twitch: jugador.twitch || resuelto.twitchLogin || '',
+    socketId: resuelto.socketId,
+    manual: true,
+  };
+
+  if (resuelto.online) {
+    const sock = nsJugador.sockets.get(resuelto.socketId);
+    if (sock) sock.emit('tu:linea-valida', payload);
+  }
+  nsGestor.emit('partida:linea-valida', payload);
+  nsJugador.emit('partida:linea-anuncio', payload);
+  nsJugador.emit('partida:reclamaciones-deshabilitadas');
+  nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+
+  console.log(`[Servidor] 🎉 LÍNEA declarada manualmente para ${jugador.nombre}.`);
+  return { ok: true };
+}
+
+function declararBingoManual(socketId) {
+  const resuelto = resolverJugadorGestor(socketId);
+  if (!resuelto) return { ok: false, msg: 'Jugador no encontrado.' };
+  if (!estado.partidaActiva) return { ok: false, msg: 'No hay partida activa.' };
+  if (estado.bingoGanado) return { ok: false, msg: 'La partida ya ha terminado.' };
+
+  const { jugador } = resuelto;
+  if (jugador.cantadoBingo) return { ok: false, msg: 'Este jugador ya tiene bingo.' };
+
+  if (resuelto.online) {
+    estado.jugadores[resuelto.socketId].cantadoBingo = true;
+    jugador.cantadoBingo = true;
+  } else {
+    resuelto.datosToken.cantadoBingo = true;
+    jugador.cantadoBingo = true;
+  }
+  sincronizarGanadorEnTokens(resuelto, 'cantadoBingo');
+
+  estado.reclamacionesHabilitadas = false;
+
+  const payload = {
+    ganador: jugador.nombre,
+    twitch: jugador.twitch || resuelto.twitchLogin || '',
+    socketId: resuelto.socketId,
+    manual: true,
+  };
+
+  if (resuelto.online) {
+    const sock = nsJugador.sockets.get(resuelto.socketId);
+    if (sock) sock.emit('tu:bingo-valido', payload);
+  }
+  nsGestor.emit('partida:bingo-valido', payload);
+  nsJugador.emit('partida:bingo-anuncio', payload);
+  nsJugador.emit('partida:reclamaciones-deshabilitadas');
+  nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
+
+  console.log(`[Servidor] 🏆 BINGO declarado manualmente para ${jugador.nombre}.`);
+  return { ok: true };
+}
+
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
 async function guardarResultados(ganadoresLinea, ganadoresBingo) {
   const dir = path.join(__dirname, 'resultados');
@@ -495,7 +618,7 @@ async function notificarDiscordGanadorConCarton({ nombre, twitch, tipoPremio, da
 
 // Con pocos jugadores manda el listado completo.
 // Con muchos (>300) manda solo estadísticas + ganadores para no saturar.
-const GESTOR_FULL_THRESHOLD = 300;
+const GESTOR_FULL_THRESHOLD = 100;
 
 function resumenJugadores() {
   const jugadoresArr = Object.values(estado.jugadores);
@@ -1218,6 +1341,18 @@ nsGestor.on('connection', (socket) => {
     nsJugador.emit('partida:reclamaciones-habilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
     console.log('[Servidor] El gestor continúa la partida para más ganadores.');
+  });
+
+  socket.on('gestor:declarar-linea', (payload) => {
+    const socketId = payload && payload.socketId;
+    const resultado = declararLineaManual(socketId);
+    if (!resultado.ok) socket.emit('gestor:error', { msg: resultado.msg });
+  });
+
+  socket.on('gestor:declarar-bingo', (payload) => {
+    const socketId = payload && payload.socketId;
+    const resultado = declararBingoManual(socketId);
+    if (!resultado.ok) socket.emit('gestor:error', { msg: resultado.msg });
   });
 
   socket.on('gestor:terminar-partida', () => {
