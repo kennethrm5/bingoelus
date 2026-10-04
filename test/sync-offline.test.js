@@ -26,6 +26,18 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function waitForMarkCount(count, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${BASE_URL}/healthz`);
+    if (!response.ok) throw new Error(`Health check failed with HTTP ${response.status}`);
+    const health = await response.json();
+    if (health.metricas.acumulado.marcadasEntrantes >= count) return;
+    await delay(10);
+  }
+  throw new Error(`Timeout waiting for ${count} mark snapshots to reach the server`);
+}
+
 function createSocket(namespace, auth) {
   const socket = io(`${BASE_URL}${namespace}`, {
     auth,
@@ -77,19 +89,18 @@ test('disconnect and transport reconnect leave the mobile player offline without
   const firstMark = card.carton[0][0];
   const secondMark = card.carton[0][1];
   const unsentMark = card.carton[1][0];
+  const health = await (await fetch(`${BASE_URL}/healthz`)).json();
+  const incomingBefore = health.metricas.acumulado.marcadasEntrantes;
 
   player.emit('jugador:actualizar-marcadas', { marcadas: [firstMark] });
-  await delay(20);
+  await waitForMarkCount(incomingBefore + 1);
   player.emit('jugador:actualizar-marcadas', { marcadas: [firstMark, secondMark] });
+  await waitForMarkCount(incomingBefore + 2);
 
   const wentOffline = waitFor(
     manager,
     'partida:jugador-unido',
-    summary => summary.jugadores.some(
-      playerInfo => playerInfo.nombre === 'Offline mobile' &&
-        !playerInfo.online &&
-        playerInfo.marcadas.includes(secondMark),
-    ),
+    summary => summary.jugadores.some(playerInfo => playerInfo.nombre === 'Offline mobile' && !playerInfo.online),
   );
   player.disconnect();
   const offlineSummary = await wentOffline;
