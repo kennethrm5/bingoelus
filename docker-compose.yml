@@ -1,0 +1,42 @@
+services:
+  servidor:
+    build:
+      context: .
+      dockerfile: servidor/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      GESTOR_TOKEN: ${GESTOR_TOKEN:-local-development-only}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+    volumes:
+      - resultados:/app/resultados
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARED_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      servidor:
+        condition: service_healthy
+
+volumes:
+  resultados:

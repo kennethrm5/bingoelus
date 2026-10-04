@@ -1,0 +1,37 @@
+unit: game-server
+side_effects:
+  - source_loc: "servidor/server.js:1551"
+    effect: "After jugador:unirse, registers a player under the current socket.id and emits that player's card and current game state."
+    must_preserve: true
+  - source_loc: "servidor/server.js:1563"
+    effect: "Accepted mark snapshots replace the registered player's marks, update the in-memory Twitch-keyed token entry, and schedule a mark delta for manager clients."
+    must_preserve: true
+  - source_loc: "servidor/server.js:1730"
+    effect: "On player disconnect, copies marks/prize flags into the in-memory token map, deletes the socket-keyed online player, and schedules a player-list broadcast."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/server.js:1565"
+    condition: "No registered player for socket.id or marcadas is not an array."
+    behavior: "Return without updating game state or notifying the client."
+    must_preserve: false
+  - source_loc: "servidor/server.js:1572"
+    condition: "Current time is less than the adaptive server-side mark rate interval after the previous accepted update."
+    behavior: "Return without acknowledgement; the update is discarded."
+    must_preserve: false
+  - source_loc: "servidor/server.js:1730"
+    condition: "Registered player socket disconnects."
+    behavior: "Player is removed from online state; saved marks remain in process memory for a later join under the same Twitch login."
+    must_preserve: true
+error_paths:
+  - source_loc: "servidor/server.js:1565"
+    trigger: "Mark update arrives on a socket that has not joined under its current socket.id."
+    outcome: "No server state change and no error event; client-visible local marks can diverge."
+    contract: "Silent return."
+    must_preserve: false
+  - source_loc: "servidor/server.js:1572"
+    trigger: "Mark update arrives inside the server's current rate-limit interval."
+    outcome: "Event is silently dropped; no retry acknowledgement is emitted."
+    contract: "Silent return."
+    must_preserve: false
+concurrency:
+  model: async

@@ -1,0 +1,20 @@
+unit: moderator-web
+side_effects:
+  - source_loc: "servidor/public/moderador.html:1394"
+    effect: "Applies server player-list broadcasts to its local state and rerenders the player cards/list."
+    must_preserve: true
+  - source_loc: "servidor/public/moderador.html:1425"
+    effect: "Applies per-player marked-cell deltas received from /gestor."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/public/moderador.html:1301"
+    condition: "Socket.IO reconnects."
+    behavior: "Hides the connection overlay and logs connected; the server separately sends estado:actual."
+    must_preserve: true
+  - source_loc: "servidor/public/moderador.html:1314"
+    condition: "Socket connection fails authentication or transport setup."
+    behavior: "Displays the error and disconnects the socket."
+    must_preserve: true
+error_paths: []
+concurrency:
+  model: async

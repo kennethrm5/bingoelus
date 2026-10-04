@@ -70,6 +70,50 @@ La solución se basa en un modelo **Server-Side Source of Truth (SSOT)**: el ser
 ## Pruebas de estrés
 Se incluyen scripts de simulación para validar concurrencia, reconexión y eventos masivos. En pruebas internas se alcanzaron miles de conexiones simultáneas y cientos de miles de eventos procesados en segundos, con latencias bajas en HTTP y WebSocket.
 
+## Arranque local del servidor con Docker
+
+Se puede ejecutar el servidor de `servidor/` localmente sin instalar Node.js en el equipo. En un checkout nuevo, copia `.env.example` a `.env` y añade ahí la configuración local que necesites:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+No sobrescribas un `.env` existente: puede contener credenciales locales. Cuando el contenedor esté healthy, el servidor estará disponible en el equipo anfitrión y en la red local:
+
+- Aplicación: `http://localhost:3000`
+- Estado del servidor: `http://localhost:3000/healthz`
+- Panel de moderación: `http://localhost:3000/moderador`
+
+Para abrirlo desde un móvil conectado a la misma Wi-Fi:
+
+1. En Windows, ejecuta `ipconfig` y busca la dirección IPv4 del adaptador Wi-Fi del PC (por ejemplo, `192.168.1.25`).
+2. En el móvil, abre `http://192.168.1.25:3000`, sustituyendo la dirección de ejemplo por la del PC. No uses `localhost`: en el móvil apuntaría al propio teléfono.
+3. Si no carga, permite las conexiones TCP entrantes al puerto 3000 en el Firewall de Windows para el perfil de red **Privada**. Comprueba también que el PC no esté conectado a una red pública o aislada por el router.
+
+El puerto queda publicado en todas las interfaces del PC, por lo que otros dispositivos de la red local también podrán acceder mientras Compose esté activo. Úsalo solo en una red de confianza y detén el contenedor con `docker compose down` al terminar.
+
+El token local predeterminado del gestor es `local-development-only`; solo debe usarse para desarrollo local. Se puede reemplazar con `GESTOR_TOKEN` en `.env`. Sin credenciales de Twitch se puede comprobar que la página y `/healthz` responden, pero no completar el login ni unirse a una partida autenticada.
+
+### Dominio de pruebas con Cloudflare Tunnel
+
+Para llegar desde Internet por `https://dev.bingoelus.online` sin modificar el túnel de producción de `bingoelus.online`:
+
+1. En Cloudflare Zero Trust, crea un **túnel nombrado independiente** para desarrollo y configura su hostname público `dev.bingoelus.online` con el servicio de origen `http://servidor:3000`. Esto crea/usa la ruta DNS del subdominio; no cambies la ruta existente de `bingoelus.online`.
+2. Copia el token de ese túnel de desarrollo a `CLOUDFLARED_TUNNEL_TOKEN` en `.env`.
+3. En `.env`, configura `BASE_URL=https://dev.bingoelus.online`, además de `TWITCH_CLIENT_ID` y `TWITCH_CLIENT_SECRET`. En la consola de Twitch registra exactamente `https://dev.bingoelus.online/auth/twitch/callback` como OAuth Redirect URL.
+4. Arranca el servidor y el túnel:
+
+   ```powershell
+   docker compose --profile tunnel up --build
+   ```
+
+El túnel sale desde el PC hacia Cloudflare; no requiere abrir puertos en el router. Para detener servidor y túnel, ejecuta `docker compose down`. El túnel de producción de GCP sigue siendo independiente. Si el hostname ya está asociado a otro túnel, Cloudflare no podrá asignarlo a este hasta que se libere esa ruta DNS.
+
+Para volver a pruebas solo locales, omite `--profile tunnel` y cambia `BASE_URL` en `.env` a `http://localhost:3000`. No compartas ni subas `.env`: contiene el token del túnel y credenciales OAuth.
+
+Los resultados se conservan en el volumen Docker `resultados` al parar el servicio con `docker compose down`. `docker compose down -v` también elimina ese volumen y los resultados locales.
+
 ## Stack tecnológico
 - **Backend:** Node.js, Express, Socket.io
 - **Frontend:** Vanilla JS, HTML5, CSS3

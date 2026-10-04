@@ -1,0 +1,21 @@
+unit: backup-job
+side_effects:
+  - source_loc: "servidor/ops/backup/bingoelus-backup.sh:43"
+    effect: "Mirrors configured source directories, creates periodic compressed archives, and prunes archives older than retention."
+    must_preserve: true
+  - source_loc: "servidor/ops/backup/bingoelus-backup.sh:61"
+    effect: "Optionally synchronizes live and archive directories to GCS or rclone target."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/ops/backup/bingoelus-backup.sh:34"
+    condition: "Configured source directory does not exist."
+    behavior: "Log a warning and continue to the next source directory."
+    must_preserve: true
+error_paths:
+  - source_loc: "servidor/ops/backup/bingoelus-backup.sh:44"
+    trigger: "rsync fails for a configured source directory."
+    outcome: "Log a warning and continue; no failure is propagated for that source."
+    contract: "Operational log via logger."
+    must_preserve: true
+concurrency:
+  model: sync

@@ -1,0 +1,21 @@
+unit: cloudflared-watchdog
+side_effects:
+  - source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:71"
+    effect: "After the configured failure threshold and cooldown, restarts configured cloudflared systemd services."
+    must_preserve: true
+  - source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:117"
+    effect: "Writes watchdog failure and restart timestamps to a local state file."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:53"
+    condition: "Local/public HTTP health, service state, or configured tunnel connection count fails."
+    behavior: "Increment failure count; after threshold, restart tunnel service(s), subject to cooldown."
+    must_preserve: true
+error_paths:
+  - source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:32"
+    trigger: "Configured health URL does not return a successful HTTP response before timeout."
+    outcome: "Mark the watchdog check unhealthy; service restart may follow the threshold."
+    contract: "Operational log via logger."
+    must_preserve: true
+concurrency:
+  model: sync
