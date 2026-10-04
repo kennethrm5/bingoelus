@@ -1,0 +1,85 @@
+contracts:
+  - name: player-mark-snapshot
+    unit: game-server
+    type: sdk
+    stability: must_preserve
+    source_loc: "servidor/server.js:1563"
+    contract:
+      method: "Socket.IO event jugador:actualizar-marcadas"
+      path: "/jugador"
+      request: "{ marcadas: string[] }; each value must belong to the registered player's card; maximum 25 accepted"
+      response: "No acknowledgement; server batches partida:marcadas-actualizadas { socketId, marcadas } to /gestor after acceptance"
+      error: "Unknown socket/player or invalid array is silently ignored; update inside adaptive rate window is silently dropped"
+      auth: "Socket.IO /jugador connection; joining requires the Twitch session cookie and jugador:unirse registration"
+    target_contract:
+      method: "Preserve Socket.IO event jugador:actualizar-marcadas and existing payload"
+      notes: "There is no target migration in this task. Record the current contract; delivery/acknowledgement semantics are a diagnosed reliability gap, not an approved contract change."
+    semantic_divergence: []
+
+  - name: player-join-and-card
+    unit: game-server
+    type: sdk
+    stability: must_preserve
+    source_loc: "servidor/server.js:1466"
+    contract:
+      method: "Socket.IO event jugador:unirse; response event tu:carton"
+      path: "/jugador"
+      request: "{ nombre: string, token: string, twitch?: string }; server derives Twitch login from twitch_sid cookie, not the payload twitch field"
+      response: "tu:carton { carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas, umbralReclamo }"
+      error: "partida:error for invalid name/session, inactive/ended game, missing Twitch session, or duplicate name"
+      auth: "Twitch session cookie on Socket.IO handshake"
+    target_contract:
+      method: "Preserve the current join request and tu:carton response shape"
+      notes: "Same event is required to register each new socket.id. Current player client does not repeat it on reconnect."
+    semantic_divergence: []
+
+  - name: player-prize-claims
+    unit: game-server
+    type: sdk
+    stability: must_preserve
+    source_loc: "servidor/server.js:1638"
+    contract:
+      method: "Socket.IO events jugador:pedir-linea and jugador:pedir-bingo"
+      path: "/jugador"
+      request: "{ marcadas: string[] } plus optional acknowledgement callback"
+      response: "Acknowledgement reports receipt; success emits tu:linea-valida or tu:bingo-valido and public announcement events"
+      error: "partida:error; invalid claims may increment strikes and emit tu:bloqueado"
+      auth: "Current socket.id must be present in estado.jugadores"
+    target_contract:
+      method: "Preserve event names, request fields, validation, and response events"
+      notes: "The server first resolves the player by socket.id; it cannot apply claim-supplied marks for an unregistered reconnect socket."
+    semantic_divergence: []
+
+  - name: manager-state-and-player-deltas
+    unit: game-server
+    type: sdk
+    stability: must_preserve
+    source_loc: "servidor/server.js:1042"
+    contract:
+      method: "Socket.IO namespace /gestor; state: estado:actual, player list: partida:jugador-unido, mark delta: partida:marcadas-actualizadas"
+      path: "/gestor"
+      request: "Client authenticates with handshake auth.token; manager events carry game actions"
+      response: "estado:actual includes online count and player summaries; player list emits are debounced; marks are sent as per-player deltas"
+      error: "Invalid token fails namespace middleware; action failures may emit gestor:error"
+      auth: "Handshake auth.token equals configured gestorToken"
+    target_contract:
+      method: "Preserve existing /gestor namespace and event payloads"
+      notes: "Both hosted moderator and Electron manager consume the same server-owned player summary and mark events."
+    semantic_divergence: []
+
+  - name: health-endpoint
+    unit: game-server
+    type: rest
+    stability: must_preserve
+    source_loc: "servidor/server.js:956"
+    contract:
+      method: "GET"
+      path: "/healthz"
+      request: "None"
+      response: "HTTP 200 JSON with ok, timestamp, online player count, and active-game flag; optional metrics when HEALTHZ_VERBOSE=1"
+      error: "No application-level Socket.IO health check"
+      auth: "None in the route"
+    target_contract:
+      method: "GET /healthz with the same existing JSON fields"
+      notes: "This is an HTTP process/game probe used by the watchdog, not proof that client namespaces or event delivery work."
+    semantic_divergence: []

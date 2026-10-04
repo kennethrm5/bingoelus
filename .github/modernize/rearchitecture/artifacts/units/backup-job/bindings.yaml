@@ -1,0 +1,21 @@
+unit: backup-job
+bindings:
+  - type: convention
+    name: "systemd oneshot backup service and timer"
+    source_loc: "servidor/ops/backup/bingoelus-backup.service:1"
+    target: "bingoelus-backup.service"
+    must_appear_in_target: true
+    notes: "Timer cadence is configured by the unit file; source script uses a local lock."
+runtime_config:
+  - key: "SOURCE_DIRS / BACKUP_BASE / RETENTION_DAYS"
+    source_loc: "servidor/ops/backup/bingoelus-backup.sh:8"
+    source: env
+    default_value: "/opt/bingoelus/ganadores:/opt/bingoelus/servidor/resultados / /opt/bingoelus/backups / 30"
+    must_appear_in_target: true
+    notes: "Ops README documents /srv paths, which differs from script defaults."
+  - key: "GSUTIL_BUCKET / RCLONE_TARGET"
+    source_loc: "servidor/ops/backup/bingoelus-backup.sh:15"
+    source: env
+    default_value: "Empty"
+    must_appear_in_target: true
+    notes: "Optional remote destinations."

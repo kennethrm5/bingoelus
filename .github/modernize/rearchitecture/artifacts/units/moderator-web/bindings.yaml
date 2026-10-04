@@ -1,0 +1,21 @@
+unit: moderator-web
+bindings:
+  - type: route-declaration
+    name: "Moderator page routes /moderador and /moderador.html"
+    source_loc: "servidor/server.js:948"
+    target: "servidor/public/moderador.html"
+    must_appear_in_target: true
+    notes: "Hosted on the same origin as the server."
+  - type: convention
+    name: "Socket.IO namespace /gestor"
+    source_loc: "servidor/public/moderador.html:644"
+    target: "Moderation controls and player list"
+    must_appear_in_target: true
+    notes: "Authenticates with handshake auth.token."
+runtime_config:
+  - key: "gestorToken"
+    source_loc: "servidor/public/moderador.html:641"
+    source: code
+    default_value: ""
+    must_appear_in_target: true
+    notes: "Entered by the moderator; value is not included in these artifacts."

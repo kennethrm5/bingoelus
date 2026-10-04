@@ -1,0 +1,33 @@
+unit: desktop-gestor
+bindings:
+  - type: convention
+    name: "Electron app startup and BrowserWindow"
+    source_loc: "main.js:34"
+    target: "Local gestor.html window"
+    must_appear_in_target: true
+    notes: "Electron uses contextIsolation and disables nodeIntegration in the renderer."
+  - type: route-declaration
+    name: "Local Express /gestor and /media"
+    source_loc: "main.js:14"
+    target: "Local desktop UI asset server"
+    must_appear_in_target: true
+    notes: "Bound to loopback port 3001."
+  - type: convention
+    name: "Remote Socket.IO namespace /gestor"
+    source_loc: "gestor.html:875"
+    target: "Remote game server"
+    must_appear_in_target: true
+    notes: "The URL and token are configured by the operator."
+runtime_config:
+  - key: "bingoelus_srv_url"
+    source_loc: "gestor.html:861"
+    source: code
+    default_value: ""
+    must_appear_in_target: true
+    notes: "Last server URL stored in localStorage."
+  - key: "gestor token"
+    source_loc: "gestor.html:875"
+    source: code
+    default_value: ""
+    must_appear_in_target: true
+    notes: "Handshake credential; do not persist or expose its value in architecture artifacts."

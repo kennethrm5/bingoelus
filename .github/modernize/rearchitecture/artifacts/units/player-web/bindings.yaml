@@ -1,0 +1,27 @@
+unit: player-web
+bindings:
+  - type: route-declaration
+    name: "Player page routes / and /jugador"
+    source_loc: "servidor/server.js:952"
+    target: "servidor/public/index.html"
+    must_appear_in_target: true
+    notes: "Responsive page with mobile viewport settings; served by Express."
+  - type: convention
+    name: "Socket.IO client namespace /jugador"
+    source_loc: "servidor/public/cliente.js:18"
+    target: "Player join, marks, game broadcasts, and prize claims"
+    must_appear_in_target: true
+    notes: "WebSocket is preferred; polling is also configured."
+runtime_config:
+  - key: "Twitch session cookie twitch_sid"
+    source_loc: "servidor/server.js:1463"
+    source: code
+    default_value: ""
+    must_appear_in_target: true
+    notes: "The server reads the cookie on the Socket.IO handshake to identify Twitch login."
+  - key: "localStorage bingoelus-token"
+    source_loc: "servidor/public/cliente.js:7"
+    source: code
+    default_value: "Generated UUID-like token"
+    must_appear_in_target: true
+    notes: "Sent in jugador:unirse; current server token map is keyed by Twitch login."

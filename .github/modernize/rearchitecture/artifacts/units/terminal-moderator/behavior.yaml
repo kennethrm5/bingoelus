@@ -1,0 +1,18 @@
+unit: terminal-moderator
+side_effects:
+  - source_loc: "servidor/moderador.js:93"
+    effect: "Emits manager phrase mark/unmark events based on terminal commands."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/moderador.js:81"
+    condition: "Operator enters ver/ls, toggle/t, exit, or an unsupported command."
+    behavior: "Displays phrases, emits the corresponding game action, exits, or reports an invalid command."
+    must_preserve: true
+error_paths:
+  - source_loc: "servidor/moderador.js:14"
+    trigger: "config.json cannot be read."
+    outcome: "Prints an error and exits with status 1."
+    contract: "CLI process exit."
+    must_preserve: true
+concurrency:
+  model: async
