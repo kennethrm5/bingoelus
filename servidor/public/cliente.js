@@ -3,6 +3,8 @@
 // el servidor decide si son válidas, aquí no validamos nada
 
 'use strict';
+const PLAYER_SESSION_KEY = 'bingoelus-player-session';
+
 // token en localStorage para que el servidor sepa que eres el mismo jugador
 function getOCrearToken() {
   let token = localStorage.getItem('bingoelus-token');
@@ -15,17 +17,40 @@ function getOCrearToken() {
   }
   return token;
 }
+
+function cargarSesionJugador() {
+  try {
+    const sesion = JSON.parse(localStorage.getItem(PLAYER_SESSION_KEY) || 'null');
+    if (!sesion || typeof sesion.nombre !== 'string' || !sesion.nombre.trim() ||
+        !Array.isArray(sesion.carton) || sesion.carton.length !== 5 ||
+        sesion.carton.some(fila => !Array.isArray(fila) || fila.length !== 5 ||
+          fila.some(frase => typeof frase !== 'string'))) {
+      return null;
+    }
+
+    const frasesCarton = new Set(sesion.carton.flat());
+    const marcadas = Array.isArray(sesion.marcadas)
+      ? [...new Set(sesion.marcadas.filter(frase => typeof frase === 'string' && frasesCarton.has(frase)))]
+      : [];
+    return { nombre: sesion.nombre.trim(), carton: sesion.carton, marcadas };
+  } catch (error) {
+    console.warn('[Cliente] No se pudo recuperar la sesión local del jugador:', error);
+    return null;
+  }
+}
+
+const sesionJugadorGuardada = cargarSesionJugador();
 const socket = io('/jugador', { transports: ['websocket', 'polling'] });
 
 // estado local del jugador
 const estado = {
-  nombre: '',
-  carton: [],
+  nombre: sesionJugadorGuardada ? sesionJugadorGuardada.nombre : '',
+  carton: sesionJugadorGuardada ? sesionJugadorGuardada.carton : [],
   cantadas: new Set(),  // sincronizadas con el servidor
-  marcadas: new Set(),  // las que el jugador ha tachado
+  marcadas: new Set(sesionJugadorGuardada ? sesionJugadorGuardada.marcadas : []),  // las que el jugador ha tachado
   recibimoLinea: false,
   recibimoBingo: false,
-  enPartida: false,
+  enPartida: !!sesionJugadorGuardada,
 };
 
 // Si el gestor ha habilitado las reclamaciones
@@ -69,9 +94,11 @@ function mostrarNotif(msg, tipo = 'info', duracion = 3500) {
   notificacionEl.textContent = msg;
   notificacionEl.className   = `visible ${tipo}`;
   clearTimeout(notifTimer);
-  notifTimer = setTimeout(() => {
-    notificacionEl.className = '';
-  }, duracion);
+  if (duracion > 0) {
+    notifTimer = setTimeout(() => {
+      notificacionEl.className = '';
+    }, duracion);
+  }
 }
 let btnCountdownIv = null;
 
@@ -82,8 +109,10 @@ let _timerEnvioMarcadas  = null;
 const RATE_MARCADAS_MS   = 120; // debe coincidir con el servidor
 let _jugadorUnido = false;
 let _unionSolicitada = false;
+let _unionSocketId = null;
 let _socketRegistrado = false;
 let _marcadasPendientesSync = false;
+let _restauracionLocalPendiente = !!sesionJugadorGuardada;
 
 function mismasMarcadas(a, b) {
   const setA = new Set(a || []);
@@ -91,9 +120,37 @@ function mismasMarcadas(a, b) {
   return setA.size === setB.size && [...setA].every(frase => setB.has(frase));
 }
 
+function mismasTarjetas(a, b) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+    a.every((fila, indice) => Array.isArray(fila) && Array.isArray(b[indice]) &&
+      fila.length === b[indice].length && fila.every((frase, columna) => frase === b[indice][columna]));
+}
+
+function guardarSesionJugador() {
+  if (!estado.nombre || !estado.carton.length) return;
+  try {
+    localStorage.setItem(PLAYER_SESSION_KEY, JSON.stringify({
+      nombre: estado.nombre,
+      carton: estado.carton,
+      marcadas: Array.from(estado.marcadas),
+    }));
+  } catch (error) {
+    console.warn('[Cliente] No se pudo guardar la sesión local del jugador:', error);
+  }
+}
+
+function borrarSesionJugador() {
+  try {
+    localStorage.removeItem(PLAYER_SESSION_KEY);
+  } catch (error) {
+    console.warn('[Cliente] No se pudo borrar la sesión local del jugador:', error);
+  }
+}
+
 function enviarMarcadas() {
   _marcadasPendientesSync = true;
   clearTimeout(_timerEnvioMarcadas);
+  guardarSesionJugador();
   if (!_socketRegistrado || !socket.connected) return;
 
   const enviar = () => {
@@ -158,6 +215,7 @@ let CASILLAS_IMG = {};
       // Repintar el cartón si el socket lo había generado entes
       if (estado.carton && estado.carton.length > 0) {
         renderizarCarton();
+        actualizarTodasLasCeldas();
       }
     })
     .catch(err => console.error('Error cargando casillas.json:', err));
@@ -194,6 +252,7 @@ function renderizarCarton() {
           estado.marcadas.add(frase);
         }
         actualizarCelda(celda, frase);
+        guardarSesionJugador();
         
         // Notificar al servidor
         enviarMarcadas();
@@ -243,9 +302,9 @@ function actualizarBotones() {
 // marca/desmarca la clase 'eligible' para dar feedback visual al jugador
 function actualizarEstadoVisualBotones() {
   const lineaElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoLinea && _socketRegistrado && socket.connected;
+                        !estado.recibimoLinea && _socketRegistrado && socket.connected && navigator.onLine;
   const bingoElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoBingo && _socketRegistrado && socket.connected;
+                        !estado.recibimoBingo && _socketRegistrado && socket.connected && navigator.onLine;
 
   btnLinea.classList.toggle('eligible', lineaElegible);
   btnBingo.classList.toggle('eligible', bingoElegible);
@@ -253,6 +312,33 @@ function actualizarEstadoVisualBotones() {
 
 // sesión Twitch
 let twitchUser = null;
+let _validandoTwitchParaRecuperacion = false;
+
+function validarTwitchParaRecuperacion() {
+  if (!_restauracionLocalPendiente || twitchUser || _validandoTwitchParaRecuperacion) return;
+  _validandoTwitchParaRecuperacion = true;
+
+  fetch('/auth/me')
+    .then(response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status} al validar Twitch`);
+      return response.json();
+    })
+    .then(user => {
+      if (!user || !user.login) {
+        mostrarNotif('Inicia sesión con Twitch para reconectar. Tus marcas siguen guardadas en este dispositivo.', 'error', 0);
+        return;
+      }
+      twitchUser = user;
+      emitirUnionJugador();
+    })
+    .catch(error => {
+      console.warn('[Cliente] No se pudo validar Twitch durante la recuperación:', error);
+      mostrarNotif('No se pudo validar Twitch. Tus marcas siguen guardadas; se reintentará al recuperar la conexión.', 'error', 0);
+    })
+    .finally(() => {
+      _validandoTwitchParaRecuperacion = false;
+    });
+}
 
 (function checkTwitchSession() {
   const params    = new URLSearchParams(window.location.search);
@@ -304,8 +390,15 @@ let twitchUser = null;
       const discordStep = document.getElementById('discord-step');
       if (discordStep) discordStep.style.display = 'flex';
       if (btnEntrar) btnEntrar.style.display = 'block';
+
+      if (_restauracionLocalPendiente) emitirUnionJugador();
     })
-    .catch(() => {
+    .catch(error => {
+      if (_restauracionLocalPendiente) {
+        console.warn('[Cliente] No se pudo consultar la sesión de Twitch:', error);
+        mostrarNotif('No se pudo validar Twitch. Tus marcas siguen guardadas; se reintentará al recuperar la conexión.', 'error', 0);
+        return;
+      }
       // error de red → intento autenticar de nuevo
       window.location.href = '/auth/twitch';
     });
@@ -336,7 +429,14 @@ function intentarEntrar() {
 
 function emitirUnionJugador() {
   if (!estado.nombre || !twitchUser) return;
+  if (!socket.connected) {
+    _unionSolicitada = true;
+    return;
+  }
+  if (_unionSocketId === socket.id) return;
+
   _unionSolicitada = true;
+  _unionSocketId = socket.id;
   socket.emit('jugador:unirse', {
     nombre: estado.nombre,
     token: getOCrearToken(),
@@ -377,6 +477,7 @@ function pasarAPantallaJuego(carton, cantadas, marcadasIniciales) {
 
   renderizarCarton();
   actualizarTodasLasCeldas();
+  guardarSesionJugador();
 
   // Los botones solo se habilitan cuando el gestor lo permita
   actualizarBotones();
@@ -395,7 +496,7 @@ btnLinea.addEventListener('click', () => {
     mostrarNotif('⏳ Tu reclamación de línea sigue en proceso...', 'info', 1500);
     return;
   }
-  if (!_socketRegistrado || !socket.connected) {
+  if (!_socketRegistrado || !socket.connected || !navigator.onLine) {
     mostrarNotif('⏳ Espera a que se recupere la conexión para reclamar línea.', 'info', 2500);
     return;
   }
@@ -426,7 +527,7 @@ btnBingo.addEventListener('click', () => {
     mostrarNotif('⏳ Tu reclamación de bingo sigue en proceso...', 'info', 1500);
     return;
   }
-  if (!_socketRegistrado || !socket.connected) {
+  if (!_socketRegistrado || !socket.connected || !navigator.onLine) {
     mostrarNotif('⏳ Espera a que se recupere la conexión para reclamar bingo.', 'info', 2500);
     return;
   }
@@ -454,13 +555,14 @@ btnBingo.addEventListener('click', () => {
 
 socket.on('connect', () => {
   console.log('[Cliente] Conectado al servidor. ID:', socket.id);
-  if (_jugadorUnido || _unionSolicitada) emitirUnionJugador();
+  if (_jugadorUnido || _unionSolicitada || _restauracionLocalPendiente) emitirUnionJugador();
 });
 
 socket.on('disconnect', () => {
   _socketRegistrado = false;
   clearTimeout(_timerEnvioMarcadas);
   if (estado.enPartida) _marcadasPendientesSync = true;
+  guardarSesionJugador();
   actualizarBotones();
   clearTimeout(reclamoLineaTimer);
   clearTimeout(reclamoBingoTimer);
@@ -471,18 +573,27 @@ socket.on('disconnect', () => {
 
 // el servidor asigna o restaura el cartón cuando el jugador se registra
 socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas: habilitadas, umbralReclamo: umbral }) => {
-  const reconexionEnEstaPagina = _jugadorUnido && estado.enPartida;
+  const mismaPartida = mismasTarjetas(estado.carton, carton);
+  const reconexionEnEstaPagina = _jugadorUnido && estado.enPartida && mismaPartida;
+  const restauracionLocal = _restauracionLocalPendiente &&
+    mismasTarjetas(sesionJugadorGuardada.carton, carton);
   const marcadasLocales = Array.from(estado.marcadas);
-  const marcadasRestauradas = reconexionEnEstaPagina ? marcadasLocales : (marcadas || []);
+  const restaurarMarcadasLocales = reconexionEnEstaPagina || restauracionLocal;
+  const marcadasRestauradas = restaurarMarcadasLocales ? marcadasLocales : (marcadas || []);
 
   _jugadorUnido = true;
   _unionSolicitada = false;
+  _unionSocketId = socket.id;
   _socketRegistrado = true;
+  _restauracionLocalPendiente = false;
   reclamacionesHabilitadas = habilitadas || false;
   umbralReclamo            = umbral ?? 0;
+  estado.carton = carton;
+  estado.marcadas = new Set(marcadasRestauradas);
+  guardarSesionJugador();
 
   const esReconexion = marcadasRestauradas.length > 0;
-  if (reconexionEnEstaPagina || esReconexion) {
+  if (reconexionEnEstaPagina || restauracionLocal || esReconexion) {
     pasarAPantallaJuego(carton, cantadas, marcadasRestauradas);
     mostrarNotif('🎱 ¡Reconectado! Tu cartón fue restaurado.', 'ok');
   } else {
@@ -493,7 +604,7 @@ socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, 
     mostrarNotif('🎱 ¡Cartón asignado! Lee las reglas y pulsa continuar.', 'ok');
   }
 
-  if (reconexionEnEstaPagina &&
+  if (restaurarMarcadasLocales &&
       (_marcadasPendientesSync || !mismasMarcadas(marcadasLocales, marcadas || []))) {
     enviarMarcadas();
   }
@@ -635,10 +746,13 @@ socket.on('tu:bloqueado', ({ segs, msg }) => {
 socket.on('partida:nueva', () => {
   _jugadorUnido = false;
   _unionSolicitada = false;
+  _unionSocketId = null;
   _socketRegistrado = false;
+  _restauracionLocalPendiente = false;
   _marcadasPendientesSync = false;
   clearTimeout(_timerEnvioMarcadas);
   _ultimoEnvioMarcadas = 0;
+  borrarSesionJugador();
   Object.assign(estado, {
     nombre: '',
     carton: [],
@@ -664,6 +778,77 @@ socket.on('partida:nueva', () => {
 
   mostrarNotif('⚠️ El gestor ha iniciado una nueva partida. Vuelve a entrar.', 'info', 5000);
 });
+
+window.addEventListener('offline', () => {
+  if (!estado.enPartida) return;
+  _marcadasPendientesSync = true;
+  guardarSesionJugador();
+  actualizarBotones();
+  mostrarNotif('⚠️ Sin conexión. Tus marcas se guardan en este dispositivo y se sincronizarán al volver la red.', 'error', 0);
+});
+
+window.addEventListener('online', () => {
+  if (!estado.enPartida) return;
+  if (_restauracionLocalPendiente && !twitchUser) {
+    validarTwitchParaRecuperacion();
+    return;
+  }
+  if (!socket.connected) {
+    mostrarNotif('🔄 Conexión recuperada. Reconectando y sincronizando tus marcas…', 'info', 0);
+    socket.connect();
+    return;
+  }
+  if (!_socketRegistrado) {
+    emitirUnionJugador();
+    return;
+  }
+  notificacionEl.className = '';
+  actualizarBotones();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !estado.enPartida) return;
+  if (_restauracionLocalPendiente && !twitchUser) {
+    validarTwitchParaRecuperacion();
+    return;
+  }
+  if (!navigator.onLine) {
+    mostrarNotif('⚠️ Sin conexión. Tus marcas se guardan en este dispositivo y se sincronizarán al volver la red.', 'error', 0);
+    return;
+  }
+  if (!socket.connected) {
+    _marcadasPendientesSync = true;
+    guardarSesionJugador();
+    mostrarNotif('⚠️ Conexión interrumpida. Reconectando y guardando tus marcas…', 'error', 0);
+    socket.connect();
+  } else if (!_socketRegistrado) {
+    emitirUnionJugador();
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  if (!estado.enPartida || !navigator.onLine) return;
+  if (_restauracionLocalPendiente && !twitchUser) {
+    validarTwitchParaRecuperacion();
+    return;
+  }
+  if (!socket.connected) socket.connect();
+  else if (!_socketRegistrado) emitirUnionJugador();
+});
+
+function restaurarSesionLocal() {
+  if (!sesionJugadorGuardada) return;
+  estado.nombre = sesionJugadorGuardada.nombre;
+  estado.carton = sesionJugadorGuardada.carton;
+  estado.marcadas = new Set(sesionJugadorGuardada.marcadas);
+  estado.enPartida = true;
+  if (nombreDisplay) nombreDisplay.textContent = estado.nombre;
+  pasarAPantallaJuego(estado.carton, [], Array.from(estado.marcadas));
+  actualizarBotones();
+  mostrarNotif('🔄 Recuperando tu partida. Tus marcas están guardadas en este dispositivo…', 'info', 0);
+}
+
+restaurarSesionLocal();
 
 // el gestor desmarcó una frase (error del gestor al cantar)
 socket.on('partida:frase-descantada', ({ frase, cantadas }) => {

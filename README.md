@@ -125,7 +125,7 @@ npm run test:sync
 docker stop bingoelus-sync-test
 ```
 
-El umbral reducido permite probar el rate limit adaptativo con 100 clientes simulados. La suite comprueba que la última instantánea sigue llegando aunque el cliente envíe cada 120 ms y el servidor aplique un intervalo de 160 ms.
+El umbral reducido permite probar el rate limit adaptativo con 100 clientes simulados. La suite comprueba que la última instantánea sigue llegando aunque el cliente envíe cada 120 ms y el servidor aplique un intervalo de 160 ms. El navegador guarda el cartón, el nombre y las marcas en el dispositivo, muestra el estado de conexión y los restaura automáticamente tras una reconexión o recarga. Esos datos locales se eliminan cuando el cliente recibe el inicio de una nueva partida.
 
 ## Stack tecnológico
 - **Backend:** Node.js, Express, Socket.io
