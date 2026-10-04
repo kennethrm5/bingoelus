@@ -70,6 +70,20 @@ La solución se basa en un modelo **Server-Side Source of Truth (SSOT)**: el ser
 ## Pruebas de estrés
 Se incluyen scripts de simulación para validar concurrencia, reconexión y eventos masivos. En pruebas internas se alcanzaron miles de conexiones simultáneas y cientos de miles de eventos procesados en segundos, con latencias bajas en HTTP y WebSocket.
 
+## Regresión de sincronización móvil
+La suite `npm run test:sync` valida la recuperación de sesión del jugador y la entrega de las marcas. Se ejecuta contra un servidor aislado en `127.0.0.1:3101`; no usa `dev.bingoelus.online` ni el túnel de Cloudflare.
+
+Desde la raíz del repositorio, construye la imagen y arranca el servidor de pruebas:
+
+```powershell
+docker build -t bingoelus-servidor -f servidor/Dockerfile .
+docker run --rm -d --name bingoelus-sync-test -p 127.0.0.1:3101:3000 -e PORT=3000 -e GESTOR_TOKEN=sync-test-token -e ALLOW_STRESS_BOTS=1 -e ONLINE_MEDIA_THRESHOLD=100 -e ONLINE_ALTA_THRESHOLD=101 -e HEALTHZ_VERBOSE=1 bingoelus-servidor
+npm run test:sync
+docker stop bingoelus-sync-test
+```
+
+El umbral reducido permite probar el rate limit adaptativo con 100 clientes simulados. La suite comprueba que la última instantánea sigue llegando aunque el cliente envíe cada 120 ms y el servidor aplique un intervalo de 160 ms.
+
 ## Stack tecnológico
 - **Backend:** Node.js, Express, Socket.io
 - **Frontend:** Vanilla JS, HTML5, CSS3
