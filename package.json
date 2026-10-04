@@ -6,7 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win"
+    "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win",
+    "test:sync": "node --test test/sync-offline.test.js"
   },
   "dependencies": {
     "compression": "^1.8.1",

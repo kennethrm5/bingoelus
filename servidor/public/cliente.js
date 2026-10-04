@@ -80,17 +80,34 @@ let btnCountdownIv = null;
 let _ultimoEnvioMarcadas = 0;
 let _timerEnvioMarcadas  = null;
 const RATE_MARCADAS_MS   = 120; // debe coincidir con el servidor
+let _jugadorUnido = false;
+let _unionSolicitada = false;
+let _socketRegistrado = false;
+let _marcadasPendientesSync = false;
+
+function mismasMarcadas(a, b) {
+  const setA = new Set(a || []);
+  const setB = new Set(b || []);
+  return setA.size === setB.size && [...setA].every(frase => setB.has(frase));
+}
+
 function enviarMarcadas() {
+  _marcadasPendientesSync = true;
   clearTimeout(_timerEnvioMarcadas);
-  const espera = RATE_MARCADAS_MS - (Date.now() - _ultimoEnvioMarcadas);
-  if (espera <= 0) {
+  if (!_socketRegistrado || !socket.connected) return;
+
+  const enviar = () => {
+    if (!_socketRegistrado || !socket.connected) return;
     _ultimoEnvioMarcadas = Date.now();
     socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
+    _marcadasPendientesSync = false;
+  };
+
+  const espera = RATE_MARCADAS_MS - (Date.now() - _ultimoEnvioMarcadas);
+  if (espera <= 0) {
+    enviar();
   } else {
-    _timerEnvioMarcadas = setTimeout(() => {
-      _ultimoEnvioMarcadas = Date.now();
-      socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
-    }, espera);
+    _timerEnvioMarcadas = setTimeout(enviar, espera);
   }
 }
 
@@ -226,9 +243,9 @@ function actualizarBotones() {
 // marca/desmarca la clase 'eligible' para dar feedback visual al jugador
 function actualizarEstadoVisualBotones() {
   const lineaElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoLinea;
+                        !estado.recibimoLinea && _socketRegistrado && socket.connected;
   const bingoElegible = reclamacionesHabilitadas && estado.enPartida &&
-                        !estado.recibimoBingo;
+                        !estado.recibimoBingo && _socketRegistrado && socket.connected;
 
   btnLinea.classList.toggle('eligible', lineaElegible);
   btnBingo.classList.toggle('eligible', bingoElegible);
@@ -312,10 +329,19 @@ function intentarEntrar() {
   if (discordError) discordError.style.display = 'none';
 
   const nombre = nombreDiscord;
-  const token  = getOCrearToken();
   estado.nombre = nombre;
   if (nombreDisplay) nombreDisplay.textContent = nombre;
-  socket.emit('jugador:unirse', { nombre, token, twitch: twitchUser.login });
+  emitirUnionJugador();
+}
+
+function emitirUnionJugador() {
+  if (!estado.nombre || !twitchUser) return;
+  _unionSolicitada = true;
+  socket.emit('jugador:unirse', {
+    nombre: estado.nombre,
+    token: getOCrearToken(),
+    twitch: twitchUser.login,
+  });
 }
 
 btnEntrar.addEventListener('click', intentarEntrar);
@@ -369,6 +395,10 @@ btnLinea.addEventListener('click', () => {
     mostrarNotif('⏳ Tu reclamación de línea sigue en proceso...', 'info', 1500);
     return;
   }
+  if (!_socketRegistrado || !socket.connected) {
+    mostrarNotif('⏳ Espera a que se recupere la conexión para reclamar línea.', 'info', 2500);
+    return;
+  }
   if (!puedeReclamar) {
     if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
     else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
@@ -396,6 +426,10 @@ btnBingo.addEventListener('click', () => {
     mostrarNotif('⏳ Tu reclamación de bingo sigue en proceso...', 'info', 1500);
     return;
   }
+  if (!_socketRegistrado || !socket.connected) {
+    mostrarNotif('⏳ Espera a que se recupere la conexión para reclamar bingo.', 'info', 2500);
+    return;
+  }
   if (!puedeReclamar) {
     if (!reclamacionesHabilitadas)    mostrarNotif('🔒 El gestor aún no ha habilitado las reclamaciones.', 'info', 2500);
     else if (!estado.enPartida)       mostrarNotif('⏸ No hay partida activa.', 'info', 2500);
@@ -420,25 +454,36 @@ btnBingo.addEventListener('click', () => {
 
 socket.on('connect', () => {
   console.log('[Cliente] Conectado al servidor. ID:', socket.id);
+  if (_jugadorUnido || _unionSolicitada) emitirUnionJugador();
 });
 
 socket.on('disconnect', () => {
+  _socketRegistrado = false;
+  clearTimeout(_timerEnvioMarcadas);
+  if (estado.enPartida) _marcadasPendientesSync = true;
+  actualizarBotones();
   clearTimeout(reclamoLineaTimer);
   clearTimeout(reclamoBingoTimer);
   reclamoLineaPendiente = false;
   reclamoBingoPendiente = false;
-  mostrarNotif('⚠️ Desconectado del servidor. Recarga la página.', 'error', 0);
+  mostrarNotif('⚠️ Desconectado del servidor. Reconectando…', 'error', 0);
 });
 
-// el servidor me asigna el cartón (también al reconectar)
+// el servidor asigna o restaura el cartón cuando el jugador se registra
 socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas: habilitadas, umbralReclamo: umbral }) => {
+  const reconexionEnEstaPagina = _jugadorUnido && estado.enPartida;
+  const marcadasLocales = Array.from(estado.marcadas);
+  const marcadasRestauradas = reconexionEnEstaPagina ? marcadasLocales : (marcadas || []);
+
+  _jugadorUnido = true;
+  _unionSolicitada = false;
+  _socketRegistrado = true;
   reclamacionesHabilitadas = habilitadas || false;
   umbralReclamo            = umbral ?? 0;
 
-  const esReconexion = marcadas && marcadas.length > 0;
-  if (esReconexion) {
-    // Reconexión: ir directamente al juego sin reglas
-    pasarAPantallaJuego(carton, cantadas, marcadas);
+  const esReconexion = marcadasRestauradas.length > 0;
+  if (reconexionEnEstaPagina || esReconexion) {
+    pasarAPantallaJuego(carton, cantadas, marcadasRestauradas);
     mostrarNotif('🎱 ¡Reconectado! Tu cartón fue restaurado.', 'ok');
   } else {
     // Primera vez: mostrar pantalla de reglas
@@ -446,6 +491,11 @@ socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, 
     pantallaLogin.style.display  = 'none';
     pantallaReglas.style.display = 'flex';
     mostrarNotif('🎱 ¡Cartón asignado! Lee las reglas y pulsa continuar.', 'ok');
+  }
+
+  if (reconexionEnEstaPagina &&
+      (_marcadasPendientesSync || !mismasMarcadas(marcadasLocales, marcadas || []))) {
+    enviarMarcadas();
   }
 
   if (lineaGanada) {
@@ -583,6 +633,12 @@ socket.on('tu:bloqueado', ({ segs, msg }) => {
 
 // nueva partida → resetear todo y volver al login
 socket.on('partida:nueva', () => {
+  _jugadorUnido = false;
+  _unionSolicitada = false;
+  _socketRegistrado = false;
+  _marcadasPendientesSync = false;
+  clearTimeout(_timerEnvioMarcadas);
+  _ultimoEnvioMarcadas = 0;
   Object.assign(estado, {
     nombre: '',
     carton: [],
@@ -615,7 +671,7 @@ socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
   // si el jugador la tenía marcada, la desmarcamos también
   if (estado.marcadas.has(frase)) {
     estado.marcadas.delete(frase);
-    socket.emit('jugador:actualizar-marcadas', { marcadas: Array.from(estado.marcadas) });
+    enviarMarcadas();
   }
   desbloquearTodo();
   actualizarTodasLasCeldas();
