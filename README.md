@@ -113,6 +113,19 @@ El túnel sale desde el PC hacia Cloudflare; no requiere abrir puertos en el rou
 Para volver a pruebas solo locales, omite `--profile tunnel` y cambia `BASE_URL` en `.env` a `http://localhost:3000`. No compartas ni subas `.env`: contiene el token del túnel y credenciales OAuth.
 
 Los resultados se conservan en el volumen Docker `resultados` al parar el servicio con `docker compose down`. `docker compose down -v` también elimina ese volumen y los resultados locales.
+## Regresión de sincronización móvil
+La suite `npm run test:sync` valida la recuperación de sesión del jugador y la entrega de las marcas. Se ejecuta contra un servidor aislado en `127.0.0.1:3101`; no usa `dev.bingoelus.online` ni el túnel de Cloudflare.
+
+Desde la raíz del repositorio, construye la imagen y arranca el servidor de pruebas:
+
+```powershell
+docker build -t bingoelus-servidor -f servidor/Dockerfile .
+docker run --rm -d --name bingoelus-sync-test -p 127.0.0.1:3101:3000 -e PORT=3000 -e GESTOR_TOKEN=sync-test-token -e ALLOW_STRESS_BOTS=1 -e ONLINE_MEDIA_THRESHOLD=100 -e ONLINE_ALTA_THRESHOLD=101 -e HEALTHZ_VERBOSE=1 bingoelus-servidor
+npm run test:sync
+docker stop bingoelus-sync-test
+```
+
+El umbral reducido permite probar el rate limit adaptativo con 100 clientes simulados. La suite comprueba que la última instantánea sigue llegando aunque el cliente envíe cada 120 ms y el servidor aplique un intervalo de 160 ms.
 
 ## Stack tecnológico
 - **Backend:** Node.js, Express, Socket.io

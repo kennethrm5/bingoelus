@@ -65,6 +65,7 @@ const estado = {
 
 const rateLimits = {};
 const rateLimitsBusquedaGestor = {};
+const marcadasPendientesRate = new Map();
 
 const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
 const RATE_MARCADAS_BASE_MS = leerEnvInt('RATE_MARCADAS_BASE_MS', 120, 40, 2000);
@@ -192,6 +193,13 @@ function limpiarColaMarcadasGestor() {
   gestorMarcadasPendientes.clear();
 }
 
+function limpiarMarcadasPendientesRate() {
+  for (const pendiente of marcadasPendientesRate.values()) {
+    clearTimeout(pendiente.timer);
+  }
+  marcadasPendientesRate.clear();
+}
+
 function programarMarcadasParaGestor(socketId, marcadas) {
   // Keep only the latest state per player inside the current batch window.
   gestorMarcadasPendientes.set(socketId, Array.isArray(marcadas) ? [...marcadas] : []);
@@ -207,6 +215,57 @@ function programarMarcadasParaGestor(socketId, marcadas) {
     }
     gestorMarcadasPendientes.clear();
   }, obtenerVentanaBatchMarcadasMs());
+}
+
+function aplicarSnapshotMarcadas(jugador, marcadas) {
+  const cartonSet = new Set(jugador.carton.flat());
+  jugador.marcadas = marcadas
+    .filter(frase => typeof frase === 'string' && cartonSet.has(frase))
+    .slice(0, 25);
+  if (estado.tokens[jugador.twitch]) {
+    estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
+  }
+}
+
+function aplicarMarcadasJugador(socket, jugador, marcadas) {
+  if (estado.jugadores[socket.id] !== jugador || !socket.connected) return;
+
+  const ahora = Date.now();
+  const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
+  const espera = obtenerRateMarcadasMs() - (ahora - (rl.lastMarcadas || 0));
+  if (espera > 0) {
+    let pendiente = marcadasPendientesRate.get(socket.id);
+    if (pendiente) {
+      pendiente.marcadas = [...marcadas];
+      return;
+    }
+
+    pendiente = { marcadas: [...marcadas], timer: null };
+    marcadasPendientesRate.set(socket.id, pendiente);
+    pendiente.timer = setTimeout(() => {
+      if (marcadasPendientesRate.get(socket.id) !== pendiente) return;
+      marcadasPendientesRate.delete(socket.id);
+      aplicarMarcadasJugador(socket, jugador, pendiente.marcadas);
+    }, espera);
+    return;
+  }
+
+  const pendiente = marcadasPendientesRate.get(socket.id);
+  if (pendiente) {
+    clearTimeout(pendiente.timer);
+    marcadasPendientesRate.delete(socket.id);
+  }
+
+  rl.lastMarcadas = ahora;
+  rateLimits[socket.id] = rl;
+  registrarMetrica('marcadasAceptadas');
+
+  aplicarSnapshotMarcadas(jugador, marcadas);
+  programarMarcadasParaGestor(socket.id, jugador.marcadas);
+
+  if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+    scheduledGestorBroadcast();
+  }
 }
 
 // ─── Twitch OAuth ─────────────────────────────────────────────
@@ -1057,6 +1116,7 @@ nsGestor.on('connection', (socket) => {
     estado.jugadores                = {};
     estado.tokens                   = {};
     estado.ips                      = {};
+    limpiarMarcadasPendientesRate();
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
@@ -1202,6 +1262,7 @@ nsGestor.on('connection', (socket) => {
   socket.on('gestor:resetear', () => {
     estado.cantadas = []; estado.verificadas = []; estado.olvidadas = [];
     estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
+    limpiarMarcadasPendientesRate();
     estado.lineaGanada = false; estado.bingoGanado = false; estado.partidaActiva = false;
     estado.partidaIniciadaTs = 0;
     estado.discordCartonesNotificados = {};
@@ -1562,38 +1623,19 @@ nsJugador.on('connection', (socket) => {
 
   socket.on('jugador:actualizar-marcadas', ({ marcadas } = {}) => {
     const jugador = estado.jugadores[socket.id];
-    const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
     registrarMetrica('marcadasEntrantes');
-
-    // Rate limit de actualizaciones de marcadas por jugador
-    const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
-    const rateMarcadasMs = obtenerRateMarcadasMs();
-    if (ahora - (rl.lastMarcadas || 0) < rateMarcadasMs) return;
-    rl.lastMarcadas = ahora;
-    rateLimits[socket.id] = rl;
-    registrarMetrica('marcadasAceptadas');
-
-    const cartonSet   = new Set(jugador.carton.flat());
-    jugador.marcadas = marcadas
-      .filter(f => typeof f === 'string' && cartonSet.has(f))
-      .slice(0, 25);
-    if (estado.tokens[jugador.twitch]) {
-      estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
-    }
-    // Delta ligero: solo manda las marcadas actualizadas de este jugador
-    programarMarcadasParaGestor(socket.id, jugador.marcadas);
-
-    // En modo compacto, refrescar periódicamente el top enviado a gestor/moderadores.
-    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
-      scheduledGestorBroadcast();
-    }
+    aplicarMarcadasJugador(socket, jugador, marcadas);
   });
 
 function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
-    const cartonSet = new Set(jugador.carton.flat());
-    jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
+    const pendiente = marcadasPendientesRate.get(jugador.socketId);
+    if (pendiente) {
+      clearTimeout(pendiente.timer);
+      marcadasPendientesRate.delete(jugador.socketId);
+    }
+    aplicarSnapshotMarcadas(jugador, frescas);
     programarMarcadasParaGestor(jugador.socketId, jugador.marcadas);
 
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
@@ -1738,6 +1780,12 @@ function registrarFalloReclamo(jugador, socket) {
     }
     if (jugador) {
       console.log(`[Servidor] ${jugador.nombre} (@${jugador.twitch}) se desconectó.`);
+      const marcasPendientes = marcadasPendientesRate.get(socket.id);
+      if (marcasPendientes) {
+        clearTimeout(marcasPendientes.timer);
+        marcadasPendientesRate.delete(socket.id);
+        aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+      }
       if (estado.tokens[jugador.twitch]) {
         estado.tokens[jugador.twitch].marcadas     = jugador.marcadas;
         estado.tokens[jugador.twitch].cantadoLinea = jugador.cantadoLinea;
