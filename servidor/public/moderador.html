@@ -236,6 +236,10 @@
     }
     .jugador-offline .jugador-cabecera { opacity: .55; }
     .jugador-offline .jugador-carton   { opacity: .75; }
+    .badge-baneado {
+      font-size: .68rem; font-weight: 700; padding: 2px 7px;
+      border-radius: 4px; background: #7f1d1d; color: #fecaca; margin-left: 4px;
+    }
 
     #panel-cartones h2 {
       font-size: .95rem;
@@ -457,6 +461,37 @@
       color: #000;
       cursor: pointer;
     }
+    .btn-banear {
+      padding: 6px 12px;
+      font-size: .78rem;
+      font-weight: 700;
+      border: 1px solid #991b1b;
+      border-radius: 5px;
+      background: #450a0a;
+      color: #fecaca;
+      cursor: pointer;
+    }
+    .cuentas-baneadas {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .cuentas-baneadas h3 {
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: .82rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .cuenta-baneada {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 0;
+      color: #fecaca;
+      font-size: .85rem;
+    }
     @keyframes pulso {
       from { text-shadow: 0 0 20px currentColor; }
       to   { text-shadow: 0 0 60px currentColor, 0 0 120px currentColor; }
@@ -583,6 +618,12 @@
     <div id="lista-jugadores">
       <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
     </div>
+    <div class="cuentas-baneadas">
+      <h3>Cuentas de Twitch baneadas</h3>
+      <div id="lista-cuentas-baneadas">
+        <p style="color:var(--muted);font-size:.85rem;">No hay cuentas baneadas.</p>
+      </div>
+    </div>
   </section>
 
   <!-- -- Log de eventos -- -->
@@ -655,6 +696,7 @@
     modo:                     'completo',
     totalJugadores:           0,
     online:                   0,
+    cuentasBaneadas:          [],
     partidaActiva:            false,
     reclamacionesHabilitadas: false,
     umbralReclamo:            0,
@@ -1119,6 +1161,12 @@
         b.textContent = 'desconectado';
         nombreEl.appendChild(b);
       }
+      if (j.baneado) {
+        const b = document.createElement('span');
+        b.className = 'badge-baneado';
+        b.textContent = 'baneado';
+        nombreEl.appendChild(b);
+      }
 
       const chevron = document.createElement('span');
       chevron.className   = 'jugador-chevron';
@@ -1169,10 +1217,10 @@
 
       inner.appendChild(grid);
 
-      if (estadoLocal.partidaActiva) {
-        const acciones = document.createElement('div');
-        acciones.className = 'jugador-acciones';
+      const acciones = document.createElement('div');
+      acciones.className = 'jugador-acciones';
 
+      if (estadoLocal.partidaActiva) {
         if (!j.cantadoLinea) {
           const btnLinea = document.createElement('button');
           btnLinea.type = 'button';
@@ -1200,9 +1248,23 @@
           });
           acciones.appendChild(btnBingo);
         }
-
-        if (acciones.childElementCount > 0) inner.appendChild(acciones);
       }
+
+      if (j.twitchVerified && !j.baneado) {
+        const btnBanear = document.createElement('button');
+        btnBanear.type = 'button';
+        btnBanear.className = 'btn-banear';
+        btnBanear.textContent = '⛔ Banear cuenta Twitch';
+        btnBanear.title = 'Expulsar al jugador y bloquear esta cuenta de Twitch permanentemente';
+        btnBanear.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (!confirm(`¿Banear permanentemente a @${j.twitch}? No podrá volver a entrar hasta que se desbanee.`)) return;
+          socket.emit('gestor:banear-twitch', { login: j.twitch });
+        });
+        acciones.appendChild(btnBanear);
+      }
+
+      if (acciones.childElementCount > 0) inner.appendChild(acciones);
 
       panelCarton.appendChild(inner);
 
@@ -1212,6 +1274,36 @@
     });
 
     aplicarFiltroJugadores(true); // Reaplicar el buscador local (sin relanzar búsqueda remota)
+  }
+
+  function renderizarCuentasBaneadas() {
+    const lista = document.getElementById('lista-cuentas-baneadas');
+    const cuentas = Array.isArray(estadoLocal.cuentasBaneadas) ? estadoLocal.cuentasBaneadas : [];
+    lista.replaceChildren();
+    if (cuentas.length === 0) {
+      const vacio = document.createElement('p');
+      vacio.style.cssText = 'color:var(--muted);font-size:.85rem;';
+      vacio.textContent = 'No hay cuentas baneadas.';
+      lista.appendChild(vacio);
+      return;
+    }
+
+    cuentas.forEach(cuenta => {
+      const fila = document.createElement('div');
+      fila.className = 'cuenta-baneada';
+      const login = document.createElement('span');
+      login.textContent = `@${cuenta.login}`;
+      const boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'btn-banear';
+      boton.textContent = 'Desbanear';
+      boton.addEventListener('click', () => {
+        if (!confirm(`¿Desbanear a @${cuenta.login}?`)) return;
+        socket.emit('gestor:desbanear-twitch', { login: cuenta.login });
+      });
+      fila.append(login, boton);
+      lista.appendChild(fila);
+    });
   }
 
   // -- Buscador de Jugadores ------------------------------
@@ -1280,6 +1372,7 @@
   function aplicarEstado(nuevoEstado) {
     estadoLocal = { ...estadoLocal, ...nuevoEstado };
     if (estadoLocal.modo !== 'compacto') estadoLocal.jugadoresBusqueda = null;
+    renderizarCuentasBaneadas();
     renderizarFrases(estadoLocal.frases, estadoLocal.cantadas);
     renderizarSeguimiento(estadoLocal.frases, estadoLocal.cantadas);
     renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
