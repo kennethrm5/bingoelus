@@ -12,7 +12,7 @@ COPY servidor/server.js servidor/casillas.json ./
 COPY servidor/public/ ./public/
 COPY media/ ./media/
 
-RUN mkdir -p /app/resultados && chown -R node:node /app
+RUN mkdir -p /app/resultados /app/datos && chown -R node:node /app
 
 USER node
 

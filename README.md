@@ -112,7 +112,9 @@ El túnel sale desde el PC hacia Cloudflare; no requiere abrir puertos en el rou
 
 Para volver a pruebas solo locales, omite `--profile tunnel` y cambia `BASE_URL` en `.env` a `http://localhost:3000`. No compartas ni subas `.env`: contiene el token del túnel y credenciales OAuth.
 
-Los resultados se conservan en el volumen Docker `resultados` al parar el servicio con `docker compose down`. `docker compose down -v` también elimina ese volumen y los resultados locales.
+Los resultados y las cuentas baneadas se conservan en los volúmenes Docker `resultados` y `cuentas-baneadas` al parar el servicio con `docker compose down`. `docker compose down -v` también elimina ambos volúmenes y esos datos locales.
+
+El panel de moderación permite banear permanentemente una cuenta autenticada de Twitch desde el cartón del jugador y desbanearla desde la lista de cuentas baneadas. El servidor expulsa sus conexiones activas y rechaza nuevos intentos de entrada. En Docker, los baneos persisten en el volumen `cuentas-baneadas`; en una instalación directa de Node.js se guardan en `servidor/datos/cuentas-baneadas.json`. Conserva ese almacenamiento para mantener los baneos después de reiniciar o actualizar el servidor.
 ## Regresión de sincronización móvil
 La suite `npm run test:sync` valida la recuperación de sesión del jugador y la entrega de las marcas. Se ejecuta contra un servidor aislado en `127.0.0.1:3101`; no usa `dev.bingoelus.online` ni el túnel de Cloudflare.
 

@@ -13,6 +13,7 @@ token
 servidor/config.json
 config.json
 .env
+servidor/datos/
 
 # Archivos de empaquetado y tests
 *.exe

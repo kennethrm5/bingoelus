@@ -13,6 +13,7 @@ services:
       BASE_URL: ${BASE_URL:-http://localhost:3000}
     volumes:
       - resultados:/app/resultados
+      - cuentas-baneadas:/app/datos
     healthcheck:
       test:
         - CMD
@@ -40,3 +41,4 @@ services:
 
 volumes:
   resultados:
+  cuentas-baneadas:

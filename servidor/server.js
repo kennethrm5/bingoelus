@@ -37,6 +37,65 @@ const PORT        = parseInt(process.env.PORT, 10) || 3000;
 const CARTON_COLS = 5;
 const CARTON_ROWS = 5;
 const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
+const TWITCH_BANS_FILE = process.env.TWITCH_BANS_FILE
+  ? path.resolve(process.env.TWITCH_BANS_FILE)
+  : path.join(__dirname, 'datos', 'cuentas-baneadas.json');
+const TWITCH_LOGIN_PATTERN = /^[a-z0-9_]{1,25}$/;
+
+function cargarCuentasBaneadas() {
+  fs.mkdirSync(path.dirname(TWITCH_BANS_FILE), { recursive: true });
+  let contenido;
+  try {
+    contenido = fs.readFileSync(TWITCH_BANS_FILE, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return new Map();
+    throw err;
+  }
+
+  const entradas = JSON.parse(contenido);
+  if (!Array.isArray(entradas)) {
+    throw new Error('El archivo de cuentas baneadas debe contener una lista.');
+  }
+
+  const baneadas = new Map();
+  for (const entrada of entradas) {
+    const login = typeof entrada?.login === 'string' ? entrada.login.toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login) || !Number.isFinite(entrada.bannedAt)) {
+      throw new Error('El archivo de cuentas baneadas contiene una entrada inválida.');
+    }
+    baneadas.set(login, { login, bannedAt: entrada.bannedAt });
+  }
+  return baneadas;
+}
+
+function guardarCuentasBaneadas(cuentas) {
+  fs.mkdirSync(path.dirname(TWITCH_BANS_FILE), { recursive: true });
+  const temporal = `${TWITCH_BANS_FILE}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temporal, `${JSON.stringify([...cuentas.values()], null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(temporal, TWITCH_BANS_FILE);
+  } catch (err) {
+    try {
+      fs.unlinkSync(temporal);
+    } catch (cleanupErr) {
+      if (cleanupErr.code !== 'ENOENT') console.error('[Servidor] No se pudo limpiar el archivo temporal de baneos:', cleanupErr.message);
+    }
+    throw err;
+  }
+}
+
+let cuentasBaneadas;
+try {
+  cuentasBaneadas = cargarCuentasBaneadas();
+  console.log(`[Servidor] Cuentas de Twitch baneadas cargadas: ${cuentasBaneadas.size}.`);
+} catch (err) {
+  console.error('[Servidor] No se pudieron cargar las cuentas de Twitch baneadas:', err.message);
+  process.exit(1);
+}
+
+function listarCuentasBaneadas() {
+  return [...cuentasBaneadas.values()].sort((a, b) => a.login.localeCompare(b.login));
+}
 
 function leerEnvInt(nombre, porDefecto, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const raw = parseInt(process.env[nombre], 10);
@@ -712,6 +771,7 @@ function resumenJugadores() {
         nombre: j.nombre,
         twitch: j.twitch || '',
         twitchVerified: j.twitchVerified || false,
+        baneado: cuentasBaneadas.has((j.twitch || '').toLowerCase()),
         carton: j.carton,
         cantadoLinea: j.cantadoLinea,
         cantadoBingo: j.cantadoBingo,
@@ -733,6 +793,7 @@ function resumenJugadores() {
     nombre:         j.nombre,
     twitch:         j.twitch || '',
     twitchVerified: j.twitchVerified || false,
+    baneado:        cuentasBaneadas.has((j.twitch || '').toLowerCase()),
     carton:         j.carton,
     cantadoLinea:   j.cantadoLinea,
     cantadoBingo:   j.cantadoBingo,
@@ -744,7 +805,8 @@ function resumenJugadores() {
     socketId:       `offline-${login}`,
     nombre:         datos.nombre,
     twitch:         login,
-    twitchVerified: true,
+    twitchVerified: !!datos.twitchVerified,
+    baneado:        cuentasBaneadas.has(login.toLowerCase()),
     carton:         datos.carton,
     cantadoLinea:   datos.cantadoLinea || false,
     cantadoBingo:   datos.cantadoBingo || false,
@@ -766,6 +828,7 @@ function construirEstadoGestor() {
     totalJugadores: resumen.totalJugadores,
     online: resumen.online,
     jugadores: resumen.jugadores || [],
+    cuentasBaneadas: listarCuentasBaneadas(),
     lineaGanada: estado.lineaGanada,
     bingoGanado: estado.bingoGanado,
     partidaActiva: estado.partidaActiva,
@@ -1274,6 +1337,60 @@ nsGestor.on('connection', (socket) => {
     console.log('[Servidor] Partida reseteada por el gestor.');
   });
 
+  socket.on('gestor:banear-twitch', (payload = {}) => {
+    const login = typeof payload.login === 'string' ? payload.login.trim().toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login)) {
+      socket.emit('gestor:error', { msg: 'La cuenta de Twitch no es válida.' });
+      return;
+    }
+
+    if (cuentasBaneadas.has(login)) return;
+    const actualizadas = new Map(cuentasBaneadas);
+    actualizadas.set(login, { login, bannedAt: Date.now() });
+    try {
+      guardarCuentasBaneadas(actualizadas);
+    } catch (err) {
+      console.error(`[Servidor] No se pudo guardar el baneo de @${login}:`, err.message);
+      socket.emit('gestor:error', { msg: 'No se pudo guardar el baneo. Comprueba el almacenamiento del servidor.' });
+      return;
+    }
+    cuentasBaneadas = actualizadas;
+
+    for (const [socketId, jugadorActivo] of Object.entries(estado.jugadores)) {
+      if ((jugadorActivo.twitch || '').toLowerCase() !== login) continue;
+      const jugadorSocket = nsJugador.sockets.get(socketId);
+      if (jugadorSocket) {
+        jugadorSocket.emit('partida:error', { msg: 'Tu cuenta de Twitch ha sido baneada de Bingoelus.' });
+        jugadorSocket.disconnect(true);
+      }
+    }
+
+    nsGestor.emit('estado:actual', construirEstadoGestor());
+    console.log(`[Moderación] Cuenta de Twitch baneada: @${login}.`);
+  });
+
+  socket.on('gestor:desbanear-twitch', (payload = {}) => {
+    const login = typeof payload.login === 'string' ? payload.login.trim().toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login)) {
+      socket.emit('gestor:error', { msg: 'La cuenta de Twitch no es válida.' });
+      return;
+    }
+    if (!cuentasBaneadas.has(login)) return;
+
+    const actualizadas = new Map(cuentasBaneadas);
+    actualizadas.delete(login);
+    try {
+      guardarCuentasBaneadas(actualizadas);
+    } catch (err) {
+      console.error(`[Servidor] No se pudo guardar el desbaneo de @${login}:`, err.message);
+      socket.emit('gestor:error', { msg: 'No se pudo guardar el desbaneo. Comprueba el almacenamiento del servidor.' });
+      return;
+    }
+    cuentasBaneadas = actualizadas;
+    nsGestor.emit('estado:actual', construirEstadoGestor());
+    console.log(`[Moderación] Cuenta de Twitch desbaneada: @${login}.`);
+  });
+
   socket.on('gestor:buscar-jugadores', (payload) => {
     const ahoraBusqueda = Date.now();
     const rlBusquedaTs = rateLimitsBusquedaGestor[socket.id] || 0;
@@ -1313,6 +1430,7 @@ nsGestor.on('connection', (socket) => {
       nombre: j.nombre,
       twitch: j.twitch || '',
       twitchVerified: j.twitchVerified || false,
+      baneado: cuentasBaneadas.has((j.twitch || '').toLowerCase()),
       carton: j.carton,
       cantadoLinea: j.cantadoLinea,
       cantadoBingo: j.cantadoBingo,
@@ -1327,7 +1445,8 @@ nsGestor.on('connection', (socket) => {
         socketId: `offline-${login}`,
         nombre: datos.nombre,
         twitch: login,
-        twitchVerified: true,
+        twitchVerified: !!datos.twitchVerified,
+        baneado: cuentasBaneadas.has(login.toLowerCase()),
         carton: datos.carton,
         cantadoLinea: !!datos.cantadoLinea,
         cantadoBingo: !!datos.cantadoBingo,
@@ -1561,6 +1680,10 @@ nsJugador.on('connection', (socket) => {
 
     // Keep a stable synthetic login per bot token when stress bypass is enabled.
     const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
+    if (cuentasBaneadas.has(twitchLogin.toLowerCase())) {
+      socket.emit('partida:error', { msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
+      return;
+    }
 
     const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
     /*
@@ -1585,9 +1708,17 @@ nsJugador.on('connection', (socket) => {
       carton = datosGuardados.carton;
     } else {
       carton = generarCarton(estado.frases);
-      estado.tokens[twitchLogin] = { carton, marcadas: [], cantadoLinea: false, cantadoBingo: false, nombre: nombreClean };
+      estado.tokens[twitchLogin] = {
+        carton,
+        marcadas: [],
+        cantadoLinea: false,
+        cantadoBingo: false,
+        nombre: nombreClean,
+        twitchVerified: !!twUser,
+      };
     }
     estado.tokens[twitchLogin].nombre = nombreClean;
+    estado.tokens[twitchLogin].twitchVerified = !!twUser;
     const marcadasGuardadas = (datosGuardados && datosGuardados.marcadas)     || [];
     const cantadoLineaGuard = (datosGuardados && datosGuardados.cantadoLinea) || false;
     const cantadoBingoGuard = (datosGuardados && datosGuardados.cantadoBingo) || false;

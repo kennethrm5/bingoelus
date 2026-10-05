@@ -193,3 +193,52 @@ test('the final mark snapshot is delivered when marks arrive 125 ms apart at the
   );
   for (const bot of bots) bot.disconnect();
 });
+
+test('a Twitch ban ejects the account, survives a new game and can be lifted by the manager', async () => {
+  const manager = await createGame();
+  const bannedToken = 'banuser000000001';
+  const bannedLogin = `stress_${bannedToken.slice(0, 16)}`;
+  const { player: bannedPlayer } = await createPlayer('Banned player', bannedToken);
+  const { player: otherPlayer } = await createPlayer('Unaffected player', 'otheruser00000001');
+
+  const banState = waitFor(
+    manager,
+    'estado:actual',
+    state => state.cuentasBaneadas?.some(account => account.login === bannedLogin),
+  );
+  const kicked = waitFor(
+    bannedPlayer,
+    'partida:error',
+    response => response.msg.includes('baneada'),
+  );
+  manager.emit('gestor:banear-twitch', { login: bannedLogin });
+  await Promise.all([banState, kicked]);
+  assert.equal(otherPlayer.connected, true, 'banning one account must not disconnect another');
+
+  const rejectedPlayer = createSocket('/jugador');
+  await connect(rejectedPlayer);
+  const rejected = waitFor(rejectedPlayer, 'partida:error', response => response.msg.includes('baneada'));
+  rejectedPlayer.emit('jugador:unirse', { nombre: 'Banned player', token: bannedToken });
+  await rejected;
+
+  const nextGame = waitFor(
+    manager,
+    'estado:actual',
+    state => state.partidaActiva && state.cuentasBaneadas?.some(account => account.login === bannedLogin),
+  );
+  manager.emit('gestor:iniciar-partida', {
+    frases: Array.from({ length: 60 }, (_, index) => `frase-${index}`),
+  });
+  await nextGame;
+
+  const unbanState = waitFor(
+    manager,
+    'estado:actual',
+    state => !state.cuentasBaneadas?.some(account => account.login === bannedLogin),
+  );
+  manager.emit('gestor:desbanear-twitch', { login: bannedLogin });
+  await unbanState;
+
+  const { card } = await createPlayer('Banned player', bannedToken);
+  assert.equal(card.carton.length, 5, 'the account should be able to rejoin after being unbanned');
+});
