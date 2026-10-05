@@ -12,17 +12,17 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0d0b00;
-      --surface:  #181400;
-      --surface2: #221e00;
-      --accent:   #f5b800;
-      --accent-h: #ffd44d;
+      --bg:       #090909;
+      --surface:  #151515;
+      --surface2: #202020;
+      --accent:   #e7ad18;
+      --accent-h: #ffd765;
       --success:  #22c55e;
       --danger:   #ef4444;
       --warn:     #fb923c;
-      --text:     #fdf6d8;
-      --muted:    #9a8040;
-      --radius:   12px;
+      --text:     #fbf7ea;
+      --muted:    #b1a47e;
+      --radius:   16px;
     }
 
     body {
@@ -739,12 +739,190 @@
       .celda-jugador    { -webkit-tap-highlight-color: transparent; }
     }
 
+    /* ── Acabado visual y canales oficiales ─────────────── */
+    body {
+      background:
+        radial-gradient(ellipse at 50% -18%, rgba(231, 173, 24, .17), transparent 52%),
+        var(--bg);
+    }
+    header {
+      position: relative;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 18px 24px;
+      background: rgba(15, 15, 15, .92);
+      border-bottom-color: rgba(231, 173, 24, .2);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .28);
+    }
+    header h1 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: clamp(1.25rem, 4vw, 1.65rem);
+      letter-spacing: .12em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .brand-mark {
+      display: inline-grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border: 1px solid rgba(255, 215, 101, .45);
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(255, 215, 101, .2), rgba(231, 173, 24, .04));
+      box-shadow: 0 0 24px rgba(231, 173, 24, .12);
+      font-size: 1.15rem;
+      letter-spacing: 0;
+    }
+    .brand-tagline {
+      color: var(--muted);
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .2em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    #contenido { width: 100%; padding: clamp(22px, 4vw, 42px) 16px; }
+    #pantalla-login,
+    #reglas-card {
+      border: 1px solid rgba(231, 173, 24, .2);
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .32), inset 0 1px rgba(255, 255, 255, .035);
+    }
+    #pantalla-login { padding: clamp(20px, 5vw, 34px); border-radius: 22px; }
+    #pantalla-login button,
+    #btn-aceptar-reglas {
+      border: 1px solid rgba(255, 215, 101, .35);
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      box-shadow: 0 8px 22px rgba(231, 173, 24, .18);
+      transition: background .2s, transform .15s, box-shadow .2s;
+    }
+    #pantalla-login button:hover,
+    #btn-aceptar-reglas:hover {
+      background: var(--accent-h);
+      box-shadow: 0 10px 28px rgba(231, 173, 24, .28);
+    }
+    #reglas-card { border-color: rgba(231, 173, 24, .2); border-radius: 20px; }
+    #cabecera-juego {
+      border: 1px solid rgba(231, 173, 24, .2);
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .22);
+    }
+    .celda-jugador { border-width: 1px; border-color: rgba(231, 173, 24, .22); }
+    #carton { perspective: 900px; }
+    #pantalla-login button:focus-visible,
+    #btn-aceptar-reglas:focus-visible,
+    #acciones button:focus-visible,
+    .social-card:focus-visible {
+      outline: 3px solid var(--accent-h);
+      outline-offset: 3px;
+    }
+    .social-footer {
+      width: 100%;
+      padding: 22px 16px max(24px, env(safe-area-inset-bottom));
+      border-top: 1px solid rgba(231, 173, 24, .18);
+      background: rgba(12, 12, 12, .92);
+    }
+    .social-inner { width: min(100%, 1040px); margin: 0 auto; }
+    .social-heading { margin-bottom: 14px; text-align: center; }
+    .social-eyebrow {
+      color: var(--accent);
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+    .social-heading h2 {
+      margin: 4px 0;
+      color: var(--text);
+      font-size: clamp(1.05rem, 3vw, 1.35rem);
+    }
+    .social-heading p { color: var(--muted); font-size: .82rem; }
+    .social-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+    }
+    .social-card {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid rgba(231, 173, 24, .16);
+      border-radius: 12px;
+      background: linear-gradient(145deg, #1a1a1a, #111);
+      color: var(--text);
+      text-decoration: none;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+    .social-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 215, 101, .56);
+      background: linear-gradient(145deg, #242016, #15130e);
+    }
+    .social-icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      place-items: center;
+      border: 1px solid rgba(255, 215, 101, .3);
+      border-radius: 10px;
+      background: rgba(231, 173, 24, .1);
+      color: var(--accent-h);
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .02em;
+    }
+    .social-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+    .social-copy strong {
+      overflow: hidden;
+      font-size: .77rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .social-copy span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: .67rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    @media (max-width: 700px) {
+      .social-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .social-footer { padding-top: 18px; }
+      .social-heading { margin-bottom: 11px; }
+      .social-copy strong,
+      .social-copy span {
+        display: -webkit-box;
+        overflow: hidden;
+        white-space: normal;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        text-overflow: clip;
+      }
+    }
+    @media (max-width: 380px) {
+      .social-card { gap: 7px; padding: 9px 8px; }
+      .social-icon { width: 30px; height: 30px; flex-basis: 30px; }
+      .social-copy strong { font-size: .71rem; }
+      .social-copy span { font-size: .63rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+
   </style>
 </head>
 <body>
 
 <header>
-  <h1>🎱 Bingoelus</h1>
+  <h1><span class="brand-mark" aria-hidden="true">🎱</span><span>Bingoelus</span></h1>
+  <p class="brand-tagline">Bingo en directo · Juega desde el móvil</p>
 </header>
 
 <div id="contenido">
@@ -870,6 +1048,46 @@
   </div>
 
 </div><!-- fin #contenido -->
+
+<footer class="social-footer" aria-label="Redes sociales y canales oficiales">
+  <div class="social-inner">
+    <div class="social-heading">
+      <span class="social-eyebrow">La comunidad Joelus</span>
+      <h2>El directo continúa en sus canales</h2>
+      <p>Sigue a Joelus y descubre sus vídeos, directos y contenido de fitness.</p>
+    </div>
+    <nav class="social-grid" aria-label="Canales oficiales de Joelus">
+      <a class="social-card" href="https://www.instagram.com/joelus/" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">IG</span>
+        <span class="social-copy"><strong>Instagram</strong><span>@joelus · Sigue sus novedades</span></span>
+      </a>
+      <a class="social-card" href="https://www.twitch.tv/joelusfitness" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">TW</span>
+        <span class="social-copy"><strong>Twitch</strong><span>JoelusFitness · Directos</span></span>
+      </a>
+      <a class="social-card" href="https://kick.com/joelus" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">K</span>
+        <span class="social-copy"><strong>Kick</strong><span>Joelus · Directos alternativos</span></span>
+      </a>
+      <a class="social-card" href="https://www.youtube.com/@Joelus" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">YT</span>
+        <span class="social-copy"><strong>YouTube · Principal</strong><span>Reacciones y chismes</span></span>
+      </a>
+      <a class="social-card" href="https://www.youtube.com/@JoelusFitness" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">YT</span>
+        <span class="social-copy"><strong>YouTube · Fitness</strong><span>Vlogs y dieta</span></span>
+      </a>
+      <a class="social-card" href="https://www.youtube.com/@Joelus2.0" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">YT</span>
+        <span class="social-copy"><strong>YouTube · Joelus2.0</strong><span>Reacciones fitness</span></span>
+      </a>
+      <a class="social-card" href="https://www.youtube.com/@JoelusFrikelus" target="_blank" rel="noopener noreferrer">
+        <span class="social-icon" aria-hidden="true">YT</span>
+        <span class="social-copy"><strong>YouTube · Frikelus</strong><span>Gameplays y ocio</span></span>
+      </a>
+    </nav>
+  </div>
+</footer>
 
 <!-- Socket.io -->
 <script src="/socket.io/socket.io.js"></script>
