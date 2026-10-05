@@ -1250,7 +1250,9 @@
         }
       }
 
-      if (j.twitchVerified && !j.baneado) {
+      const loginTwitch = typeof j.twitch === 'string' ? j.twitch.trim() : '';
+      const cuentaTwitchReal = loginTwitch.length > 0 && j.twitchVerified !== false;
+      if (cuentaTwitchReal && !j.baneado) {
         const btnBanear = document.createElement('button');
         btnBanear.type = 'button';
         btnBanear.className = 'btn-banear';
@@ -1258,8 +1260,8 @@
         btnBanear.title = 'Expulsar al jugador y bloquear esta cuenta de Twitch permanentemente';
         btnBanear.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          if (!confirm(`¿Banear permanentemente a @${j.twitch}? No podrá volver a entrar hasta que se desbanee.`)) return;
-          socket.emit('gestor:banear-twitch', { login: j.twitch });
+          if (!confirm(`¿Banear permanentemente a @${loginTwitch}? No podrá volver a entrar hasta que se desbanee.`)) return;
+          socket.emit('gestor:banear-twitch', { login: loginTwitch });
         });
         acciones.appendChild(btnBanear);
       }
