@@ -58,6 +58,10 @@ La solución se basa en un modelo **Server-Side Source of Truth (SSOT)**: el ser
 - **Watchdog de cloudflared**: systemd timer que verifica el túnel y el endpoint `/healthz`. Si detecta caída o degradación, reinicia el servicio para restaurar la conectividad pública.
 - **Backup automatizado**: jobs programados que exportan resultados y cartones ganadores a almacenamiento seguro (local y remoto en un canal del servidor de la comunidad en Discord), con retención configurable.
 
+### Iniciar el gestor de escritorio en Windows
+
+Desde una copia del proyecto, instala las dependencias una vez con `npm install` y luego abre `Iniciar Gestor.bat` para iniciar la aplicación de escritorio. El gestor se conecta al servidor cuya dirección configures en su pantalla de conexión; este archivo no inicia el servidor ni Docker.
+
 ## Justificación de la selección de tecnologías
 - **Node.js**: modelo event-loop ideal para cientos/miles de conexiones concurrentes con I/O no bloqueante.
 - **Express**: capa HTTP ligera para endpoints y middleware sin sobrecarga.
