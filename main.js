@@ -28,7 +28,7 @@ function crearVentana() {
     width: 1280,
     height: 860,
     title: 'Bingoelus — Gestor',
-    icon: path.join(__dirname, 'media', 'joelus.ico'),
+    icon: path.join(__dirname, 'media', 'bingoelus.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

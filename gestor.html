@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />
+  <link rel="icon" type="image/png" href="/media/bingoelus.png" />
   <title>Bingoelus — Gestor</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
@@ -54,10 +54,20 @@
       box-shadow: var(--shadow);
     }
     header h1 {
+      display: flex;
+      align-items: center;
+      gap: 12px;
       font-size: 1.4rem;
       color: var(--accent-h);
       letter-spacing: .05em;
       font-family: var(--font-title);
+    }
+    .brand-logo {
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 0 12px rgba(245,184,0,.3));
     }
     #url-publica {
       background: var(--surface2);
@@ -666,7 +676,17 @@
       flex-direction: column;
       gap: 12px;
     }
-    .connect-card h2 { color: var(--accent-h); font-size: 1.4rem; text-align: center; margin-bottom: 4px; }
+    .connect-card h2 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--accent-h);
+      font-size: 1.4rem;
+      text-align: center;
+      margin-bottom: 4px;
+    }
+    .connect-card .brand-logo { width: 64px; height: 64px; }
     .connect-card p  { color: var(--muted); font-size: .88rem; text-align: center; }
     .connect-card input {
       width: 100%; background: var(--bg);
@@ -701,7 +721,7 @@
 <!-- ═══════════════ OVERLAY CONEXIÓN ═══════════════ -->
 <div id="overlay-conexion">
   <div class="connect-card">
-    <h2>🎱 Bingoelus — Gestor</h2>
+    <h2><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingoelus — Gestor</h2>
     <p>Introduce la URL del servidor y el token para conectar.</p>
     <input id="input-srv-url" type="url" placeholder="https://bingoelus.online" autocomplete="off" />
     <input id="input-gestor-token" type="password" placeholder="Token del gestor" autocomplete="off"
@@ -736,7 +756,7 @@
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header>
-  <h1>🎱 Bingoelus — Panel del Gestor</h1>
+  <h1><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingoelus — Panel del Gestor</h1>
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
     <div id="url-publica">
       <div class="info-bloque">
