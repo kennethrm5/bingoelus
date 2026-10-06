@@ -6,7 +6,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />
+  <link rel="icon" type="image/png" href="/media/bingoelus.png" />
   <title>Bingoelus 🎱</title>
   <style>
     /* ── Reset & Variables ─────────────────────────────── */
@@ -765,17 +765,12 @@
       text-align: center;
       text-transform: uppercase;
     }
-    .brand-mark {
-      display: inline-grid;
-      place-items: center;
-      width: 38px;
-      height: 38px;
-      border: 1px solid rgba(255, 215, 101, .45);
-      border-radius: 12px;
-      background: linear-gradient(145deg, rgba(255, 215, 101, .2), rgba(231, 173, 24, .04));
-      box-shadow: 0 0 24px rgba(231, 173, 24, .12);
-      font-size: 1.15rem;
-      letter-spacing: 0;
+    .brand-logo {
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 0 12px rgba(231, 173, 24, .3));
     }
     .brand-tagline {
       color: var(--muted);
@@ -983,8 +978,8 @@
 <body>
 
 <header>
-  <h1><span class="brand-mark" aria-hidden="true">🎱</span><span>Bingoelus</span></h1>
-  <p class="brand-tagline">Bingo en directo · Juega desde el móvil</p>
+  <h1><img class="brand-logo" src="/media/bingoelus.png" alt="" /><span>Bingo De Recorte</span></h1>
+  <p class="brand-tagline">¡Se viene prime!</p>
 </header>
 
 <div id="contenido">
