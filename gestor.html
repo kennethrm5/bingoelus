@@ -6,27 +6,26 @@
   <link rel="icon" type="image/png" href="/media/bingoelus.png" />
   <title>Bingoelus — Gestor</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
     /* ── Reset & Variables ─────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0d0b00;
-      --surface:   #181400;
-      --surface2:  #221e00;
-      --accent:    #f5b800;
-      --accent-h:  #ffd44d;
+      --bg:        #090909;
+      --surface:   #151515;
+      --surface2:  #202020;
+      --accent:    #e7ad18;
+      --accent-h:  #ffd765;
       --success:   #22c55e;
       --danger:    #ef4444;
       --warn:      #fb923c;
-      --text:      #fdf6d8;
-      --muted:     #9a8040;
-      --border:    #3d3500;
-      --border-2:  #4a3a00;
-      --radius:    10px;
+      --text:      #fbf7ea;
+      --muted:     #b1a47e;
+      --border:    rgba(231, 173, 24, .18);
+      --border-2:  rgba(231, 173, 24, .24);
+      --radius:    16px;
       --shadow:    0 4px 24px rgba(0,0,0,.65);
-      --font-ui:   'Manrope', system-ui, sans-serif;
-      --font-title:'Space Grotesk', 'Manrope', system-ui, sans-serif;
+      --font-ui:   'Segoe UI', system-ui, sans-serif;
+      --font-title:'Segoe UI', system-ui, sans-serif;
     }
 
     body {
@@ -702,6 +701,77 @@
       cursor: pointer; transition: background .2s;
     }
     .connect-card button:hover { background: var(--accent-h); }
+
+    /* Acabado visual unificado con la página de jugadores */
+    body {
+      background:
+        radial-gradient(ellipse at 50% -18%, rgba(231, 173, 24, .17), transparent 52%),
+        var(--bg);
+    }
+    header {
+      background: rgba(15, 15, 15, .92);
+      border-bottom-color: rgba(231, 173, 24, .2);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .28);
+    }
+    .card,
+    .lux-panel {
+      border: 1px solid rgba(231, 173, 24, .2);
+      border-radius: 18px;
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 18px 46px rgba(0, 0, 0, .28), inset 0 1px rgba(255, 255, 255, .035);
+    }
+    .card h2,
+    #panel-cartones h2 { color: var(--accent-h); }
+    .jugador-fila {
+      border-color: rgba(231, 173, 24, .16);
+      border-radius: 12px;
+      background: linear-gradient(145deg, #1a1a1a, #111);
+    }
+    .input-control,
+    textarea,
+    input:not([type="hidden"]),
+    select {
+      border-radius: 12px;
+      border-color: rgba(231, 173, 24, .2);
+      background-color: #101010;
+      color: var(--text);
+    }
+    .input-control:focus,
+    textarea:focus,
+    input:focus,
+    select:focus {
+      border-color: var(--accent-h);
+      box-shadow: 0 0 0 3px rgba(231, 173, 24, .12);
+    }
+    button.primary:not(.danger),
+    #btn-copiar,
+    #btn-umbral,
+    .connect-card button {
+      border: 1px solid rgba(255, 215, 101, .35);
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      box-shadow: 0 8px 22px rgba(231, 173, 24, .16);
+      transition: transform .15s, box-shadow .2s, filter .2s;
+    }
+    button.primary:not(.danger):hover,
+    #btn-copiar:hover,
+    #btn-umbral:hover,
+    .connect-card button:hover {
+      background: linear-gradient(135deg, #ffe49a, var(--accent-h));
+      box-shadow: 0 10px 28px rgba(231, 173, 24, .24);
+      transform: translateY(-1px);
+    }
+    #overlay-conexion { background: rgba(9, 9, 9, .96); }
+    .connect-card {
+      border: 1px solid rgba(231, 173, 24, .24);
+      border-radius: 22px;
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .5), inset 0 1px rgba(255, 255, 255, .035);
+    }
+    :focus-visible {
+      outline: 3px solid var(--accent-h);
+      outline-offset: 3px;
+    }
 
     #overlay-musica {
       position: fixed;

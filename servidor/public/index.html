@@ -808,12 +808,45 @@
       box-shadow: 0 10px 28px rgba(231, 173, 24, .28);
     }
     #reglas-card { border-color: rgba(231, 173, 24, .2); border-radius: 20px; }
+    #reglas-card .regla + .regla {
+      padding-top: 14px;
+      border-top: 1px solid rgba(231, 173, 24, .12);
+    }
+    #reglas-resumen {
+      border: 1px solid rgba(231, 173, 24, .14);
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(231, 173, 24, .08), rgba(20, 20, 20, .8));
+    }
     #cabecera-juego {
       border: 1px solid rgba(231, 173, 24, .2);
+      border-radius: 18px;
       background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
       box-shadow: 0 10px 30px rgba(0, 0, 0, .22);
     }
-    .celda-jugador { border-width: 1px; border-color: rgba(231, 173, 24, .22); }
+    #pantalla-juego { gap: clamp(12px, 2.5vh, 18px); }
+    .celda-jugador {
+      border-width: 1px;
+      border-color: rgba(231, 173, 24, .22);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: inset 0 1px rgba(255, 255, 255, .025), 0 6px 18px rgba(0, 0, 0, .18);
+    }
+    .celda-jugador.marcada {
+      border-color: rgba(255, 215, 101, .72);
+      box-shadow: 0 0 16px rgba(231, 173, 24, .14), inset 0 1px rgba(255, 255, 255, .04);
+    }
+    #acciones button {
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, .22);
+      transition: transform .15s, box-shadow .2s, filter .2s;
+    }
+    #acciones button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 26px rgba(0, 0, 0, .3);
+      filter: brightness(1.06);
+    }
+    #acciones button:active { transform: scale(.98); }
     #carton { perspective: 900px; }
     #pantalla-login button:focus-visible,
     #btn-aceptar-reglas:focus-visible,
