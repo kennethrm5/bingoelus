@@ -4,12 +4,12 @@
 
 'use strict';
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path    = require('path');
 const http    = require('http');
 const express = require('express');
 
-const PORT_LOCAL = 3001; // servidor local solo para servir gestor.html y media
+let portLocal;
 
 // Servidor Express mínimo: solo sirve el HTML del gestor y los archivos de media
 const xApp = express();
@@ -17,7 +17,7 @@ xApp.get('/gestor', (_req, res) => {
   res.sendFile(path.join(__dirname, 'gestor.html'));
 });
 xApp.use('/media', express.static(path.join(__dirname, 'media')));
-http.createServer(xApp).listen(PORT_LOCAL, '127.0.0.1');
+const servidorLocal = http.createServer(xApp);
 
 // ─── Ventana Electron ─────────────────────────────────────────
 
@@ -35,20 +35,58 @@ function crearVentana() {
     },
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${PORT_LOCAL}/gestor`);
+  mainWindow.loadURL(`http://127.0.0.1:${portLocal}/gestor`);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-app.whenReady().then(() => {
-  crearVentana();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) crearVentana();
+function iniciarServidorLocal() {
+  return new Promise((resolve, reject) => {
+    servidorLocal.once('error', reject);
+    servidorLocal.listen(0, '127.0.0.1', () => {
+      servidorLocal.removeListener('error', reject);
+      const address = servidorLocal.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('No se pudo obtener el puerto del servidor local.'));
+        return;
+      }
+      portLocal = address.port;
+      resolve();
+    });
   });
-});
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(async () => {
+    try {
+      await iniciarServidorLocal();
+      crearVentana();
+    } catch (error) {
+      console.error('No se pudo iniciar el servidor local del gestor:', error);
+      dialog.showErrorBox(
+        'Error al iniciar el gestor',
+        `No se pudo iniciar el servidor local: ${error.message}`
+      );
+      app.quit();
+      return;
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) crearVentana();
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}

@@ -62,8 +62,8 @@
       font-family: var(--font-title);
     }
     .brand-logo {
-      width: 58px;
-      height: 58px;
+      width: 84px;
+      height: 84px;
       object-fit: contain;
       flex-shrink: 0;
       filter: drop-shadow(0 0 12px rgba(245,184,0,.3));
@@ -296,6 +296,7 @@
       padding-right: 4px;
     }
     .jugador-fila {
+      flex: 0 0 auto;
       background: var(--surface2);
       border: 1px solid #3d3500;
       border-radius: var(--radius);
@@ -685,7 +686,7 @@
       text-align: center;
       margin-bottom: 4px;
     }
-    .connect-card .brand-logo { width: 64px; height: 64px; }
+    .connect-card .brand-logo { width: 88px; height: 88px; }
     .connect-card p  { color: var(--muted); font-size: .88rem; text-align: center; }
     .connect-card input {
       width: 100%; background: var(--bg);
@@ -772,6 +773,19 @@
       outline: 3px solid var(--accent-h);
       outline-offset: 3px;
     }
+    @media (max-width: 600px) {
+      header {
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 10px 14px;
+        gap: 8px;
+      }
+      header h1 { flex: 1 1 100%; justify-content: center; gap: 8px; font-size: 1.08rem; }
+      header > div { width: 100%; align-items: center !important; }
+      #url-publica { justify-content: center; }
+      header .brand-logo { width: 72px; height: 72px; }
+      .connect-card .brand-logo { width: 72px; height: 72px; }
+    }
 
     #overlay-musica {
       position: fixed;
@@ -791,7 +805,7 @@
 <!-- ═══════════════ OVERLAY CONEXIÓN ═══════════════ -->
 <div id="overlay-conexion">
   <div class="connect-card">
-    <h2><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingoelus — Gestor</h2>
+    <h2><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingo de Recorte</h2>
     <p>Introduce la URL del servidor y el token para conectar.</p>
     <input id="input-srv-url" type="url" placeholder="https://bingoelus.online" autocomplete="off" />
     <input id="input-gestor-token" type="password" placeholder="Token del gestor" autocomplete="off"
@@ -1663,7 +1677,12 @@
     });
     socket.on('connect_error', (err) => {
       const errEl = document.getElementById('connect-error');
-      if (errEl) errEl.textContent = 'Error: ' + (err.message || 'no se pudo conectar.');
+      const message = err.message || 'no se pudo conectar.';
+      if (errEl) {
+        errEl.textContent = message.toLowerCase() === 'websocket error'
+          ? 'Servidor no conectado'
+          : 'Error: ' + message;
+      }
       if (socket) { socket.disconnect(); socket = null; }
     });
     socket.on('disconnect', () => {
