@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/png" href="/media/bingoelus.png" />
-  <title>Bingoelus — Moderador</title>
+  <title>Bingoelus - Moderador</title>
   <style>
     /* -- Reset & Variables ----------------------------------- */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -62,11 +62,26 @@
       font-family: var(--font-title);
     }
     .brand-logo {
-      width: 58px;
-      height: 58px;
+      width: 84px;
+      height: 84px;
       object-fit: contain;
       flex-shrink: 0;
       filter: drop-shadow(0 0 12px rgba(245,184,0,.3));
+    }
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      line-height: 1.05;
+    }
+    .brand-name { font-size: 1.4rem; }
+    .brand-section {
+      color: var(--muted);
+      font-family: var(--font-ui);
+      font-size: .82rem;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
     }
     #url-publica {
       background: var(--surface2);
@@ -544,17 +559,20 @@
       flex-direction: column;
       gap: 12px;
     }
-    .connect-card h2 {
+    .connect-brand {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      color: var(--accent-h);
-      font-size: 1.4rem;
-      text-align: center;
+      gap: 16px;
       margin-bottom: 4px;
     }
-    .connect-card .brand-logo { width: 64px; height: 64px; }
+    .connect-card .brand-logo { width: 88px; height: 88px; }
+    .connect-card .brand-copy { text-align: left; }
+    .connect-card h2 {
+      color: var(--accent-h);
+      font-size: 1.65rem;
+    }
+    .connect-card .brand-section { font-size: .9rem; }
     .connect-card p  { color: var(--muted); font-size: .88rem; text-align: center; }
     .connect-card input {
       width: 100%; background: var(--bg);
@@ -640,6 +658,22 @@
       outline: 3px solid var(--accent-h);
       outline-offset: 3px;
     }
+    @media (max-width: 600px) {
+      header {
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 10px 14px;
+        gap: 8px;
+      }
+      header h1 { flex: 1 1 100%; justify-content: center; gap: 8px; }
+      header > div { width: 100%; align-items: center !important; }
+      #url-publica { justify-content: center; }
+      header .brand-logo { width: 72px; height: 72px; }
+      .brand-name { font-size: 1.08rem; }
+      .brand-section { font-size: .68rem; }
+      .connect-card .brand-logo { width: 72px; height: 72px; }
+      .connect-card h2 { font-size: 1.35rem; }
+    }
 
   </style>
 </head>
@@ -648,7 +682,13 @@
 <!-- --------------- OVERLAY CONEXIÓN --------------- -->
 <div id="overlay-conexion">
   <div class="connect-card">
-    <h2><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingoelus — Moderador</h2>
+    <div class="connect-brand">
+      <img class="brand-logo" src="/media/bingoelus.png" alt="" />
+      <div class="brand-copy">
+        <h2>Bingoelus</h2>
+        <span class="brand-section">Moderadores</span>
+      </div>
+    </div>
     <p>Introduce tu token de moderador para autentificarte en el panel.</p>
     <input id="input-srv-url" type="hidden" value="http://localhost" />
     <input id="input-gestor-token" type="password" placeholder="Token del moderador" autocomplete="off"
@@ -660,7 +700,13 @@
 
 <!-- --------------- HEADER --------------- -->
 <header>
-  <h1><img class="brand-logo" src="/media/bingoelus.png" alt="" />Bingoelus — Panel de Moderación</h1>
+  <h1>
+    <img class="brand-logo" src="/media/bingoelus.png" alt="" />
+    <span class="brand-copy">
+      <span class="brand-name">Bingoelus</span>
+      <span class="brand-section">Moderadores</span>
+    </span>
+  </h1>
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
     <div id="url-publica">
       <div class="info-bloque">
@@ -1497,7 +1543,12 @@
     });
     socket.on('connect_error', (err) => {
       const errEl = document.getElementById('connect-error');
-      if (errEl) errEl.textContent = 'Error: ' + (err.message || 'no se pudo conectar.');
+      const message = err.message || 'no se pudo conectar.';
+      if (errEl) {
+        errEl.textContent = message.toLowerCase() === 'websocket error'
+          ? 'Servidor no conectado'
+          : 'Error: ' + message;
+      }
       if (socket) { socket.disconnect(); socket = null; }
     });
     socket.on('disconnect', () => {

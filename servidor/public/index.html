@@ -766,8 +766,8 @@
       text-transform: uppercase;
     }
     .brand-logo {
-      width: 58px;
-      height: 58px;
+      width: clamp(68px, 8vw, 92px);
+      height: clamp(68px, 8vw, 92px);
       object-fit: contain;
       flex-shrink: 0;
       filter: drop-shadow(0 0 12px rgba(231, 173, 24, .3));
@@ -994,6 +994,7 @@
     }
     @media (max-width: 380px) {
       #contenido { min-height: 300px; }
+      .brand-logo { width: 64px; height: 64px; }
       .social-card { gap: 7px; padding: 9px 8px; }
       .social-icon { width: 34px; height: 34px; flex-basis: 34px; }
       .social-icon svg { width: 19px; height: 19px; }
@@ -1143,9 +1144,9 @@
 <footer class="social-footer" aria-label="Redes sociales y canales oficiales">
   <div class="social-inner">
     <div class="social-heading">
-      <span class="social-eyebrow">La comunidad Joelus</span>
+      <span class="social-eyebrow">La comunidad de Joelus</span>
       <h2>El directo continúa en sus canales</h2>
-      <p>Sigue a Joelus y descubre sus vídeos, directos y contenido de fitness.</p>
+      <p>Sigue a Joelus y descubre sus vídeos, directos y contenido fitness.</p>
     </div>
     <section class="social-section" aria-labelledby="social-networks-title">
       <h3 id="social-networks-title">Redes sociales</h3>
@@ -1183,13 +1184,13 @@
           <span class="social-icon twitch" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 2 1.5 6v15h5v3h4l3-3h4l5.5-5.5V2H4Zm16 12.5L17 17h-5l-3 3v-3H4V4h16v10.5ZM11 7h2v6h-2V7Zm5 0h2v6h-2V7Z"/></svg>
           </span>
-          <span class="social-copy"><strong>Twitch</strong><span>JoelusFitness · Directos</span></span>
+          <span class="social-copy"><strong>Twitch</strong><span>JoelusFitness · Directos Principales</span></span>
         </a>
         <a class="social-card" href="https://kick.com/joelus" target="_blank" rel="noopener noreferrer">
           <span class="social-icon kick" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 2h5v7l6.3-7h6.2l-7.2 8.2L22 22h-6.1l-5.2-7.1L9 16.8V22H4V2Z"/></svg>
           </span>
-          <span class="social-copy"><strong>Kick</strong><span>Joelus · Directos alternativos</span></span>
+          <span class="social-copy"><strong>Kick</strong><span>Joelus</span></span>
         </a>
         <a class="social-card" href="https://rumble.com/user/joeluscommunis" target="_blank" rel="noopener noreferrer">
           <span class="social-icon rumble" aria-hidden="true">
@@ -1207,14 +1208,14 @@
             <img class="social-avatar" src="/media/social/joelus.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
-          <span class="social-copy"><strong>Canal principal</strong><span>Reacciones y chismes</span></span>
+          <span class="social-copy"><strong>Joelus</strong><span>Reacciones y chismes</span></span>
         </a>
         <a class="social-card" href="https://www.youtube.com/@JoelusFitness" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
             <img class="social-avatar" src="/media/social/joelus-fitness.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
-          <span class="social-copy"><strong>Canal fitness</strong><span>Vlogs y dieta</span></span>
+          <span class="social-copy"><strong>JoelusFitness</strong><span>Vlogs y dieta</span></span>
         </a>
         <a class="social-card" href="https://www.youtube.com/@Joelus2.0" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
