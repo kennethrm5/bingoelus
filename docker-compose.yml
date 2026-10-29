@@ -27,7 +27,6 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    profiles: ["tunnel"]
     command:
       - tunnel
       - --no-autoupdate

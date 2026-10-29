@@ -6,8 +6,8 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="icon" type="image/png" href="/media/bingoelus.png" />
-  <title>Bingoelus 🎱</title>
+  <link rel="icon" type="image/png" href="/media/bingoelus-app-icon.png?v=1" />
+  <title>Bingoelus - Jugadores</title>
   <style>
     /* ── Reset & Variables ─────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -18,9 +18,9 @@
       --surface2: #202020;
       --accent:   #e7ad18;
       --accent-h: #ffd765;
-      --success:  #22c55e;
-      --danger:   #ef4444;
-      --warn:     #fb923c;
+      --success:  #ffd765;
+      --danger:   #d77d68;
+      --warn:     #e7ad18;
       --text:     #fbf7ea;
       --muted:    #b1a47e;
       --radius:   16px;
@@ -100,8 +100,8 @@
       width: 100%;
       padding: 16px 20px;
       border-radius: var(--radius);
-      background: #1f0a3c;
-      border: 1px solid #9147ff66;
+      background: linear-gradient(145deg, #241d0f, #15120b);
+      border: 1px solid rgba(231, 173, 24, .38);
       display: none;
       align-items: center;
       gap: 14px;
@@ -110,24 +110,24 @@
       width: 52px;
       height: 52px;
       border-radius: 50%;
-      background: #9147ff;
+      background: var(--accent);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 1.4rem;
       font-weight: 700;
-      color: #fff;
+      color: #090909;
       flex-shrink: 0;
     }
     #twitch-card-info { flex: 1; }
     #twitch-card-name {
       font-size: 1.1rem;
       font-weight: 700;
-      color: #fff;
+      color: var(--text);
     }
     #twitch-card-login {
       font-size: .85rem;
-      color: #9147ff;
+      color: var(--accent-h);
       font-weight: 600;
     }
     #twitch-logout {
@@ -262,6 +262,17 @@
       font-size: .82rem;
       color: var(--muted);
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    #reglas-resumen span::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(231, 173, 24, .4);
     }
     #btn-aceptar-reglas {
       width: 100%;
@@ -307,7 +318,7 @@
       background: var(--surface2);
       color: var(--muted);
     }
-    #estado-partida.activa   { background: #14532d; color: var(--success); }
+    #estado-partida.activa   { background: #302610; color: var(--success); border: 1px solid rgba(231, 173, 24, .36); }
     #estado-partida.finalizada { background: #450a0a; color: var(--danger); }
 
     /* Cartón 5×5 */
@@ -348,9 +359,9 @@
     }
     /* Estado: penalizada por clicks en no-cantada */
     .celda-jugador.penalizada {
-      background: linear-gradient(135deg, #450a0a, #7f1d1d);
-      border-color: #ef4444;
-      color: #fca5a5;
+      background: linear-gradient(135deg, #3a211c, #542a20);
+      border-color: var(--danger);
+      color: #f1b6a7;
       cursor: not-allowed;
       box-shadow: 0 0 10px rgba(239,68,68,.5);
     }
@@ -360,7 +371,7 @@
       right: 6px;
       font-size: .75rem;
       font-weight: 700;
-      color: #ef4444;
+      color: var(--danger);
       background: rgba(0,0,0,.55);
       border-radius: 4px;
       padding: 1px 5px;
@@ -388,7 +399,7 @@
       transition: background .3s ease;
     }
     .celda-con-foto.marcada::before {
-      background: rgba(34, 197, 94, 0.15);
+      background: rgba(231, 173, 24, 0.2);
     }
     .celda-con-foto.penalizada::before {
       background: rgba(69, 10, 10, 0.88);
@@ -411,8 +422,8 @@
          0    0   8px rgba(0,0,0,.7);
     }
     /* Overrides de color por estado — sobre el span directamente */
-    .celda-jugador.marcada    span { color: #86efac; }
-    .celda-jugador.penalizada span { color: #fca5a5; }
+    .celda-jugador.marcada    span { color: #ffe28a; }
+    .celda-jugador.penalizada span { color: #f1b6a7; }
     @keyframes shake {
       0%,100% { transform: translateX(0); }
       20%      { transform: translateX(-6px); }
@@ -427,18 +438,18 @@
     }
     /* Estado: marcada por el jugador — tachada con énfasis */
     .celda-jugador.marcada {
-      background: linear-gradient(135deg, #14532d, #166534);
-      border-color: var(--success);
+      background: linear-gradient(145deg, #594411, #392c0d);
+      border-color: rgba(255, 215, 101, .72);
       font-weight: 700;
       text-decoration: line-through;
-      text-decoration-color: #86efac99;
-      box-shadow: 0 0 12px rgba(34,197,94,.4);
+      text-decoration-color: rgba(255, 226, 138, .6);
+      box-shadow: 0 0 12px rgba(231, 173, 24, .22);
       cursor: default;
       animation: pulso-boton 1.4s ease-in-out infinite alternate;
     }
     @keyframes pulso-boton {
-      from { box-shadow: 0 0 6px 2px rgba(255,255,255,.2); }
-      to   { box-shadow: 0 0 22px 6px rgba(255,255,255,.5); }
+      from { box-shadow: 0 0 6px 1px rgba(231,173,24,.12); }
+      to   { box-shadow: 0 0 16px 2px rgba(231,173,24,.3); }
     }
     @keyframes aparecer {
       from { transform: scale(.9); opacity: .4; }
@@ -460,17 +471,23 @@
       font-weight: 700;
       cursor: pointer;
       transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
     }
     #btn-linea {
-      background: var(--warn);
-      color: #000;
+      background: #302610;
+      border: 1px solid rgba(231, 173, 24, .42);
+      color: var(--accent-h);
     }
-    #btn-linea:hover  { background: #fcd34d; }
+    #btn-linea:hover  { background: #453613; }
     #btn-bingo {
-      background: var(--success);
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      border: 1px solid rgba(255, 215, 101, .55);
       color: #000;
     }
-    #btn-bingo:hover  { background: #4ade80; }
+    #btn-bingo:hover  { background: #ffe49a; }
     /* Bloqueo global durante penalización de casilla */
     #carton.bloqueado { pointer-events: none; }
     #carton.bloqueado .celda-jugador:not(.penalizada) { opacity: 0.35; filter: grayscale(60%); }
@@ -510,8 +527,8 @@
       font-weight: 700;
       font-size: .92rem;
     }
-    #banner-anuncio.linea { background: #451a0333; border: 1px solid var(--warn);    color: var(--warn); }
-    #banner-anuncio.bingo { background: #052e1633; border: 1px solid var(--success); color: var(--success); }
+    #banner-anuncio.linea { background: rgba(231, 173, 24, .07); border: 1px solid var(--warn); color: var(--warn); }
+    #banner-anuncio.bingo { background: rgba(231, 173, 24, .1); border: 1px solid var(--success); color: var(--success); }
 
     /* ── Scrollbar ─────────────────────────────────────── */
     ::-webkit-scrollbar       { width: 4px; }
@@ -540,7 +557,7 @@
     #modal-premio p {
       font-size: 1.5rem;
       font-weight: 900;
-      color: #fff;
+      color: #090909;
       text-shadow: 0 0 20px currentColor;
       max-width: 380px;
     }
@@ -551,7 +568,7 @@
       border: none;
       border-radius: var(--radius);
       background: var(--accent);
-      color: #fff;
+      color: #090909;
       font-size: 1.05rem;
       font-weight: 700;
       cursor: pointer;
@@ -735,7 +752,7 @@
     @media (hover: none) {
       #pantalla-login button:hover  { background: var(--accent); }
       #btn-aceptar-reglas:hover     { background: var(--accent); }
-      #btn-linea:hover  { background: var(--warn); }
+      #btn-linea:hover  { background: #453613; }
       #btn-bingo:hover  { background: var(--success); }
       .celda-jugador    { -webkit-tap-highlight-color: transparent; }
     }
@@ -848,6 +865,11 @@
     }
     #acciones button:active { transform: scale(.98); }
     #carton { perspective: 900px; }
+    #acciones svg { width: 20px; height: 20px; fill: currentColor; flex: 0 0 auto; }
+    #pantalla-juego { width: min(100%, 760px); }
+    #carton { gap: clamp(4px, 1vw, 8px); }
+    .celda-jugador { min-width: 0; overflow: hidden; }
+    #acciones button { min-height: 52px; }
     #pantalla-login button:focus-visible,
     #btn-aceptar-reglas:focus-visible,
     #acciones button:focus-visible,
@@ -916,20 +938,20 @@
       border: 1px solid rgba(255, 215, 101, .3);
       border-radius: 10px;
       background: rgba(231, 173, 24, .1);
-      color: #f5f5f5;
+      color: var(--accent-h);
     }
     .social-icon svg {
       width: 23px;
       height: 23px;
       fill: currentColor;
     }
-    .social-icon.instagram { color: #e6a8ff; }
-    .social-icon.tiktok { color: #fff; }
-    .social-icon.x-twitter { color: #fff; }
-    .social-icon.discord { color: #9daeff; }
-    .social-icon.twitch { color: #b99aff; }
-    .social-icon.kick { color: #53fc18; }
-    .social-icon.rumble { color: #85d34a; }
+    .social-icon.instagram,
+    .social-icon.tiktok,
+    .social-icon.x-twitter,
+    .social-icon.discord,
+    .social-icon.twitch,
+    .social-icon.kick,
+    .social-icon.rumble { color: var(--accent-h); }
     .social-avatar-wrap {
       position: relative;
       width: 44px;
@@ -954,8 +976,8 @@
       padding: 3px 4px;
       border: 1px solid #111;
       border-radius: 5px;
-      background: #f00;
-      color: #fff;
+      background: #302610;
+      color: var(--accent-h);
     }
     .youtube-mark svg {
       display: block;
@@ -1022,7 +1044,7 @@
 <div id="modal-premio">
   <img id="modal-premio-img" src="" alt="Premio" />
   <p id="modal-premio-msg"></p>
-  <button id="modal-premio-btn">Continuar ▶</button>
+  <button id="modal-premio-btn">Continuar</button>
 </div>
 
 <!-- ════════ NOTIFICACIÓN FLOTANTE ════════ -->
@@ -1032,7 +1054,7 @@
 <div id="pantalla-login">
 
   <!-- Estado: verificando sesión / errores OAuth -->
-  <div id="twitch-loading">🟣 Verificando sesión de Twitch...</div>
+  <div id="twitch-loading">Verificando sesión de Twitch...</div>
 
   <!-- Tarjeta Twitch (visible al confirmarse la sesión) -->
   <div id="twitch-card">
@@ -1046,21 +1068,21 @@
 
   <!-- Paso Discord (visible tras confirmar sesión Twitch) -->
   <div id="discord-step">
-    <label for="input-discord">👾 ¿Cuál es tu nombre en el servidor de Discord?</label>
+    <label for="input-discord">¿Cuál es tu nombre en el servidor de Discord?</label>
     <input id="input-discord" type="text" placeholder="Tu nombre en Discord" maxlength="32" autocomplete="off" />
     <span id="discord-error">Debes introducir tu nombre de Discord para poder jugar.</span>
   </div>
 
-  <button id="btn-entrar" style="display:none">▶ Entrar al juego</button>
+  <button id="btn-entrar" style="display:none">Entrar al juego</button>
   <div id="msg-espera" style="display:none">
-    ⏳ Esperando que el gestor inicie una partida...
+    Esperando que el gestor inicie una partida...
   </div>
 </div>
 
 <!-- ════════ PANTALLA DE REGLAS ════════ -->
 <div id="pantalla-reglas">
   <div id="reglas-card">
-    <h2>🎱 <span>Cómo Jugar</span> — BINGOELUS</h2>
+    <h2><span>Cómo jugar</span> — BINGOELUS</h2>
 
     <div class="regla">
       <div class="regla-num">1</div>
@@ -1111,14 +1133,14 @@
     </div>
 
     <div id="reglas-resumen">
-      <span>👁 Mira el stream</span>
-      <span>✅ Marca lo que haya pasado</span>
-      <span>⏳ Evita el spam al hacer clics</span>
-      <span>🏆 Reclama ¡Línea! o ¡Bingo! a tiempo</span>
+      <span>Mira el stream</span>
+      <span>Marca lo que haya pasado</span>
+      <span>Evita el spam al hacer clics</span>
+      <span>Reclama ¡Línea! o ¡Bingo! a tiempo</span>
     </div>
   </div>
 
-  <button id="btn-aceptar-reglas">¡Entendido, a jugar! 🎱</button>
+  <button id="btn-aceptar-reglas">Entendido, a jugar</button>
 </div>
 
 <!-- ════════ PANTALLA DE JUEGO ════════ -->
@@ -1134,8 +1156,14 @@
   <div id="carton"></div>
 
   <div id="acciones">
-    <button id="btn-linea">🎉 ¡Línea!</button>
-    <button id="btn-bingo">🏆 ¡Bingo!</button>
+    <button id="btn-linea">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h3v3H4V5Zm6 0h3v3h-3V5Zm6 0h3v3h-3V5ZM4 10.5h3v3H4v-3Zm6 0h3v3h-3v-3Zm6 0h3v3h-3v-3ZM4 16h3v3H4v-3Zm6 0h3v3h-3v-3Zm6 0h3v3h-3v-3Z"/></svg>
+      <span>¡Línea!</span>
+    </button>
+    <button id="btn-bingo">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v2a5 5 0 0 1-4 4.9V13h3v2H8v-2h3v-3.1A5 5 0 0 1 7 5V3Zm-3 1h2v2a3 3 0 0 0 2.2 2.9l-.5 1.9A5 5 0 0 1 4 6V4Zm14 0h2v2a5 5 0 0 1-3.7 4.8l-.5-1.9A3 3 0 0 0 18 6V4ZM6 19h12v2H6v-2Z"/></svg>
+      <span>¡Bingo!</span>
+    </button>
   </div>
 
 </div><!-- fin #pantalla-juego -->
@@ -1205,28 +1233,28 @@
       <nav class="social-grid" aria-label="Canales de YouTube de Joelus">
         <a class="social-card" href="https://www.youtube.com/@Joelus" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
-            <img class="social-avatar" src="/media/social/joelus.jpg" alt="" loading="lazy" decoding="async" />
+            <img class="social-avatar" src="media/social/joelus.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
           <span class="social-copy"><strong>Joelus</strong><span>Reacciones y chismes</span></span>
         </a>
         <a class="social-card" href="https://www.youtube.com/@JoelusFitness" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
-            <img class="social-avatar" src="/media/social/joelus-fitness.jpg" alt="" loading="lazy" decoding="async" />
+            <img class="social-avatar" src="media/social/joelus-fitness.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
           <span class="social-copy"><strong>JoelusFitness</strong><span>Vlogs y dieta</span></span>
         </a>
         <a class="social-card" href="https://www.youtube.com/@Joelus2.0" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
-            <img class="social-avatar" src="/media/social/joelus-2.jpg" alt="" loading="lazy" decoding="async" />
+            <img class="social-avatar" src="media/social/joelus-2.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
           <span class="social-copy"><strong>Joelus2.0</strong><span>Reacciones fitness</span></span>
         </a>
         <a class="social-card" href="https://www.youtube.com/@JoelusFrikelus" target="_blank" rel="noopener noreferrer">
           <span class="social-avatar-wrap" aria-hidden="true">
-            <img class="social-avatar" src="/media/social/joelus-frikelus.jpg" alt="" loading="lazy" decoding="async" />
+            <img class="social-avatar" src="media/social/joelus-frikelus.jpg" alt="" loading="lazy" decoding="async" />
             <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
           </span>
           <span class="social-copy"><strong>Joelus Frikelus</strong><span>Gameplays y ocio</span></span>

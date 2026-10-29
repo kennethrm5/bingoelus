@@ -18,7 +18,7 @@ if not exist "node_modules\express\package.json" (
   exit /b 1
 )
 
-call npm start
+call npm start dev
 if errorlevel 1 (
   echo No se pudo iniciar el gestor.
   pause

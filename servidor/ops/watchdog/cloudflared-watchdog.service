@@ -6,6 +6,6 @@ After=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/default/bingoelus-cloudflared-watchdog
-ExecStart=/opt/bingoelus/ops/watchdog/cloudflared-watchdog.sh
+ExecStart=/usr/bin/bash /opt/bingoelus/ops/watchdog/cloudflared-watchdog.sh
 User=root
 Group=root
