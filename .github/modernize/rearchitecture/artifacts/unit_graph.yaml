@@ -1,0 +1,93 @@
+units:
+  - name: game-server
+    trigger: handler
+    trigger_detail: "Express routes and Socket.IO namespaces /jugador and /gestor on port 3000"
+    source_anchors:
+      - path: servidor/server.js
+        line: 1
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on: []
+    shared_refs: []
+
+  - name: player-web
+    trigger: page
+    trigger_detail: "GET /, /jugador, or /jugador.html; browser page for desktop and mobile players"
+    source_anchors:
+      - path: servidor/public/index.html
+        line: 1
+      - path: servidor/public/cliente.js
+        line: 1
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on:
+      - unit: game-server
+        via: "HTTP/OAuth and Socket.IO namespace /jugador"
+    shared_refs: []
+
+  - name: moderator-web
+    trigger: page
+    trigger_detail: "GET /moderador or /moderador.html"
+    source_anchors:
+      - path: servidor/public/moderador.html
+        line: 1
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on:
+      - unit: game-server
+        via: "Socket.IO namespace /gestor"
+    shared_refs: []
+
+  - name: desktop-gestor
+    trigger: page
+    trigger_detail: "Electron startup loads local /gestor page and connects to remote /gestor namespace"
+    source_anchors:
+      - path: main.js
+        line: 1
+      - path: gestor.html
+        line: 1
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on:
+      - unit: game-server
+        via: "Socket.IO namespace /gestor"
+    shared_refs: []
+
+  - name: terminal-moderator
+    trigger: cli
+    trigger_detail: "Direct Node.js invocation of servidor/moderador.js"
+    source_anchors:
+      - path: servidor/moderador.js
+        line: 1
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on:
+      - unit: game-server
+        via: "Socket.IO namespace /gestor at localhost:3000"
+    shared_refs: []
+
+  - name: cloudflared-watchdog
+    trigger: job
+    trigger_detail: "systemd timer cloudflared-watchdog.timer; checked-in interval 30 seconds"
+    source_anchors:
+      - path: servidor/ops/watchdog/cloudflared-watchdog.timer
+      - path: servidor/ops/watchdog/cloudflared-watchdog.service
+      - path: servidor/ops/watchdog/cloudflared-watchdog.sh
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on:
+      - unit: game-server
+        via: "HTTP GET /healthz and cloudflared systemd service/tunnel checks"
+    shared_refs: []
+
+  - name: backup-job
+    trigger: job
+    trigger_detail: "systemd timer bingoelus-backup.timer"
+    source_anchors:
+      - path: servidor/ops/backup/bingoelus-backup.timer
+      - path: servidor/ops/backup/bingoelus-backup.service
+      - path: servidor/ops/backup/bingoelus-backup.sh
+    exported_signature: []
+    dynamic_entrypoints: []
+    depends_on: []
+    shared_refs: []

@@ -1,0 +1,15 @@
+unit: terminal-moderator
+bindings:
+  - type: convention
+    name: "Socket.IO client namespace /gestor"
+    source_loc: "servidor/moderador.js:17"
+    target: "Local manager namespace"
+    must_appear_in_target: true
+    notes: "Default endpoint is http://localhost:3000/gestor."
+runtime_config:
+  - key: "servidor/config.json gestorToken"
+    source_loc: "servidor/moderador.js:9"
+    source: code
+    default_value: "No default; process exits when unavailable"
+    must_appear_in_target: true
+    notes: "Secret contents intentionally excluded."

@@ -6,6 +6,6 @@ After=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/default/bingoelus-backup
-ExecStart=/opt/bingoelus/ops/backup/bingoelus-backup.sh
+ExecStart=/usr/bin/bash /opt/bingoelus/ops/backup/bingoelus-backup.sh
 User=root
 Group=root

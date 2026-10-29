@@ -1,0 +1,27 @@
+unit: cloudflared-watchdog
+bindings:
+  - type: convention
+    name: "systemd oneshot service and periodic timer"
+    source_loc: "servidor/ops/watchdog/cloudflared-watchdog.service:1"
+    target: "cloudflared-watchdog.service"
+    must_appear_in_target: true
+    notes: "Checked-in timer activates every 30 seconds; service runs as root."
+runtime_config:
+  - key: "LOCAL_HEALTH_URL"
+    source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:18"
+    source: env
+    default_value: "http://127.0.0.1:3000/healthz"
+    must_appear_in_target: true
+    notes: "HTTP probe only; does not exercise Socket.IO."
+  - key: "PRIMARY_SERVICE / CLONE_SERVICE / CHECK_CLONE"
+    source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:11"
+    source: env
+    default_value: "cloudflared / cloudflared-clon / 1"
+    must_appear_in_target: true
+    notes: "Effective VM values are unknown; example config and docs must not be treated as live state."
+  - key: "PUBLIC_HEALTH_URL / PRIMARY_TUNNEL / CLONE_TUNNEL"
+    source_loc: "servidor/ops/watchdog/cloudflared-watchdog.sh:17"
+    source: env
+    default_value: "Empty"
+    must_appear_in_target: true
+    notes: "Public health and tunnel connection checks are conditional."

@@ -1,0 +1,2 @@
+flows: []
+notes: "The player UI/server/manager exchange state through explicit HTTP and Socket.IO contracts recorded in wire_contracts.yaml. The server's in-memory game/token maps are internal to game-server; no implicit cross-unit session, static, or request-context flow was found."

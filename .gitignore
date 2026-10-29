@@ -13,6 +13,11 @@ token
 servidor/config.json
 config.json
 .env
+servidor/datos/
+servidor/resultados/
+ganadores/
+backups/
+caso de potra o no
 
 # Archivos de empaquetado y tests
 *.exe

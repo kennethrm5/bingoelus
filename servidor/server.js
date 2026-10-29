@@ -37,6 +37,65 @@ const PORT        = parseInt(process.env.PORT, 10) || 3000;
 const CARTON_COLS = 5;
 const CARTON_ROWS = 5;
 const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
+const TWITCH_BANS_FILE = process.env.TWITCH_BANS_FILE
+  ? path.resolve(process.env.TWITCH_BANS_FILE)
+  : path.join(__dirname, 'datos', 'cuentas-baneadas.json');
+const TWITCH_LOGIN_PATTERN = /^[a-z0-9_]{1,25}$/;
+
+function cargarCuentasBaneadas() {
+  fs.mkdirSync(path.dirname(TWITCH_BANS_FILE), { recursive: true });
+  let contenido;
+  try {
+    contenido = fs.readFileSync(TWITCH_BANS_FILE, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return new Map();
+    throw err;
+  }
+
+  const entradas = JSON.parse(contenido);
+  if (!Array.isArray(entradas)) {
+    throw new Error('El archivo de cuentas baneadas debe contener una lista.');
+  }
+
+  const baneadas = new Map();
+  for (const entrada of entradas) {
+    const login = typeof entrada?.login === 'string' ? entrada.login.toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login) || !Number.isFinite(entrada.bannedAt)) {
+      throw new Error('El archivo de cuentas baneadas contiene una entrada inválida.');
+    }
+    baneadas.set(login, { login, bannedAt: entrada.bannedAt });
+  }
+  return baneadas;
+}
+
+function guardarCuentasBaneadas(cuentas) {
+  fs.mkdirSync(path.dirname(TWITCH_BANS_FILE), { recursive: true });
+  const temporal = `${TWITCH_BANS_FILE}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temporal, `${JSON.stringify([...cuentas.values()], null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(temporal, TWITCH_BANS_FILE);
+  } catch (err) {
+    try {
+      fs.unlinkSync(temporal);
+    } catch (cleanupErr) {
+      if (cleanupErr.code !== 'ENOENT') console.error('[Servidor] No se pudo limpiar el archivo temporal de baneos:', cleanupErr.message);
+    }
+    throw err;
+  }
+}
+
+let cuentasBaneadas;
+try {
+  cuentasBaneadas = cargarCuentasBaneadas();
+  console.log(`[Servidor] Cuentas de Twitch baneadas cargadas: ${cuentasBaneadas.size}.`);
+} catch (err) {
+  console.error('[Servidor] No se pudieron cargar las cuentas de Twitch baneadas:', err.message);
+  process.exit(1);
+}
+
+function listarCuentasBaneadas() {
+  return [...cuentasBaneadas.values()].sort((a, b) => a.login.localeCompare(b.login));
+}
 
 function leerEnvInt(nombre, porDefecto, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const raw = parseInt(process.env[nombre], 10);
@@ -65,6 +124,7 @@ const estado = {
 
 const rateLimits = {};
 const rateLimitsBusquedaGestor = {};
+const marcadasPendientesRate = new Map();
 
 const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
 const RATE_MARCADAS_BASE_MS = leerEnvInt('RATE_MARCADAS_BASE_MS', 120, 40, 2000);
@@ -192,6 +252,13 @@ function limpiarColaMarcadasGestor() {
   gestorMarcadasPendientes.clear();
 }
 
+function limpiarMarcadasPendientesRate() {
+  for (const pendiente of marcadasPendientesRate.values()) {
+    clearTimeout(pendiente.timer);
+  }
+  marcadasPendientesRate.clear();
+}
+
 function programarMarcadasParaGestor(socketId, marcadas) {
   // Keep only the latest state per player inside the current batch window.
   gestorMarcadasPendientes.set(socketId, Array.isArray(marcadas) ? [...marcadas] : []);
@@ -207,6 +274,57 @@ function programarMarcadasParaGestor(socketId, marcadas) {
     }
     gestorMarcadasPendientes.clear();
   }, obtenerVentanaBatchMarcadasMs());
+}
+
+function aplicarSnapshotMarcadas(jugador, marcadas) {
+  const cartonSet = new Set(jugador.carton.flat());
+  jugador.marcadas = marcadas
+    .filter(frase => typeof frase === 'string' && cartonSet.has(frase))
+    .slice(0, 25);
+  if (estado.tokens[jugador.twitch]) {
+    estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
+  }
+}
+
+function aplicarMarcadasJugador(socket, jugador, marcadas) {
+  if (estado.jugadores[socket.id] !== jugador || !socket.connected) return;
+
+  const ahora = Date.now();
+  const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
+  const espera = obtenerRateMarcadasMs() - (ahora - (rl.lastMarcadas || 0));
+  if (espera > 0) {
+    let pendiente = marcadasPendientesRate.get(socket.id);
+    if (pendiente) {
+      pendiente.marcadas = [...marcadas];
+      return;
+    }
+
+    pendiente = { marcadas: [...marcadas], timer: null };
+    marcadasPendientesRate.set(socket.id, pendiente);
+    pendiente.timer = setTimeout(() => {
+      if (marcadasPendientesRate.get(socket.id) !== pendiente) return;
+      marcadasPendientesRate.delete(socket.id);
+      aplicarMarcadasJugador(socket, jugador, pendiente.marcadas);
+    }, espera);
+    return;
+  }
+
+  const pendiente = marcadasPendientesRate.get(socket.id);
+  if (pendiente) {
+    clearTimeout(pendiente.timer);
+    marcadasPendientesRate.delete(socket.id);
+  }
+
+  rl.lastMarcadas = ahora;
+  rateLimits[socket.id] = rl;
+  registrarMetrica('marcadasAceptadas');
+
+  aplicarSnapshotMarcadas(jugador, marcadas);
+  programarMarcadasParaGestor(socket.id, jugador.marcadas);
+
+  if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+    scheduledGestorBroadcast();
+  }
 }
 
 // ─── Twitch OAuth ─────────────────────────────────────────────
@@ -653,6 +771,7 @@ function resumenJugadores() {
         nombre: j.nombre,
         twitch: j.twitch || '',
         twitchVerified: j.twitchVerified || false,
+        baneado: cuentasBaneadas.has((j.twitch || '').toLowerCase()),
         carton: j.carton,
         cantadoLinea: j.cantadoLinea,
         cantadoBingo: j.cantadoBingo,
@@ -674,6 +793,7 @@ function resumenJugadores() {
     nombre:         j.nombre,
     twitch:         j.twitch || '',
     twitchVerified: j.twitchVerified || false,
+    baneado:        cuentasBaneadas.has((j.twitch || '').toLowerCase()),
     carton:         j.carton,
     cantadoLinea:   j.cantadoLinea,
     cantadoBingo:   j.cantadoBingo,
@@ -685,7 +805,8 @@ function resumenJugadores() {
     socketId:       `offline-${login}`,
     nombre:         datos.nombre,
     twitch:         login,
-    twitchVerified: true,
+    twitchVerified: !!datos.twitchVerified,
+    baneado:        cuentasBaneadas.has(login.toLowerCase()),
     carton:         datos.carton,
     cantadoLinea:   datos.cantadoLinea || false,
     cantadoBingo:   datos.cantadoBingo || false,
@@ -707,6 +828,7 @@ function construirEstadoGestor() {
     totalJugadores: resumen.totalJugadores,
     online: resumen.online,
     jugadores: resumen.jugadores || [],
+    cuentasBaneadas: listarCuentasBaneadas(),
     lineaGanada: estado.lineaGanada,
     bingoGanado: estado.bingoGanado,
     partidaActiva: estado.partidaActiva,
@@ -1057,6 +1179,7 @@ nsGestor.on('connection', (socket) => {
     estado.jugadores                = {};
     estado.tokens                   = {};
     estado.ips                      = {};
+    limpiarMarcadasPendientesRate();
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
@@ -1202,6 +1325,7 @@ nsGestor.on('connection', (socket) => {
   socket.on('gestor:resetear', () => {
     estado.cantadas = []; estado.verificadas = []; estado.olvidadas = [];
     estado.jugadores = {}; estado.tokens = {}; estado.ips = {};
+    limpiarMarcadasPendientesRate();
     estado.lineaGanada = false; estado.bingoGanado = false; estado.partidaActiva = false;
     estado.partidaIniciadaTs = 0;
     estado.discordCartonesNotificados = {};
@@ -1211,6 +1335,60 @@ nsGestor.on('connection', (socket) => {
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
     console.log('[Servidor] Partida reseteada por el gestor.');
+  });
+
+  socket.on('gestor:banear-twitch', (payload = {}) => {
+    const login = typeof payload.login === 'string' ? payload.login.trim().toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login)) {
+      socket.emit('gestor:error', { msg: 'La cuenta de Twitch no es válida.' });
+      return;
+    }
+
+    if (cuentasBaneadas.has(login)) return;
+    const actualizadas = new Map(cuentasBaneadas);
+    actualizadas.set(login, { login, bannedAt: Date.now() });
+    try {
+      guardarCuentasBaneadas(actualizadas);
+    } catch (err) {
+      console.error(`[Servidor] No se pudo guardar el baneo de @${login}:`, err.message);
+      socket.emit('gestor:error', { msg: 'No se pudo guardar el baneo. Comprueba el almacenamiento del servidor.' });
+      return;
+    }
+    cuentasBaneadas = actualizadas;
+
+    for (const [socketId, jugadorActivo] of Object.entries(estado.jugadores)) {
+      if ((jugadorActivo.twitch || '').toLowerCase() !== login) continue;
+      const jugadorSocket = nsJugador.sockets.get(socketId);
+      if (jugadorSocket) {
+        jugadorSocket.emit('partida:error', { msg: 'Tu cuenta de Twitch ha sido baneada de Bingoelus.' });
+        jugadorSocket.disconnect(true);
+      }
+    }
+
+    nsGestor.emit('estado:actual', construirEstadoGestor());
+    console.log(`[Moderación] Cuenta de Twitch baneada: @${login}.`);
+  });
+
+  socket.on('gestor:desbanear-twitch', (payload = {}) => {
+    const login = typeof payload.login === 'string' ? payload.login.trim().toLowerCase() : '';
+    if (!TWITCH_LOGIN_PATTERN.test(login)) {
+      socket.emit('gestor:error', { msg: 'La cuenta de Twitch no es válida.' });
+      return;
+    }
+    if (!cuentasBaneadas.has(login)) return;
+
+    const actualizadas = new Map(cuentasBaneadas);
+    actualizadas.delete(login);
+    try {
+      guardarCuentasBaneadas(actualizadas);
+    } catch (err) {
+      console.error(`[Servidor] No se pudo guardar el desbaneo de @${login}:`, err.message);
+      socket.emit('gestor:error', { msg: 'No se pudo guardar el desbaneo. Comprueba el almacenamiento del servidor.' });
+      return;
+    }
+    cuentasBaneadas = actualizadas;
+    nsGestor.emit('estado:actual', construirEstadoGestor());
+    console.log(`[Moderación] Cuenta de Twitch desbaneada: @${login}.`);
   });
 
   socket.on('gestor:buscar-jugadores', (payload) => {
@@ -1252,6 +1430,7 @@ nsGestor.on('connection', (socket) => {
       nombre: j.nombre,
       twitch: j.twitch || '',
       twitchVerified: j.twitchVerified || false,
+      baneado: cuentasBaneadas.has((j.twitch || '').toLowerCase()),
       carton: j.carton,
       cantadoLinea: j.cantadoLinea,
       cantadoBingo: j.cantadoBingo,
@@ -1266,7 +1445,8 @@ nsGestor.on('connection', (socket) => {
         socketId: `offline-${login}`,
         nombre: datos.nombre,
         twitch: login,
-        twitchVerified: true,
+        twitchVerified: !!datos.twitchVerified,
+        baneado: cuentasBaneadas.has(login.toLowerCase()),
         carton: datos.carton,
         cantadoLinea: !!datos.cantadoLinea,
         cantadoBingo: !!datos.cantadoBingo,
@@ -1500,6 +1680,10 @@ nsJugador.on('connection', (socket) => {
 
     // Keep a stable synthetic login per bot token when stress bypass is enabled.
     const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
+    if (cuentasBaneadas.has(twitchLogin.toLowerCase())) {
+      socket.emit('partida:error', { msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
+      return;
+    }
 
     const ip = (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
     /*
@@ -1524,9 +1708,17 @@ nsJugador.on('connection', (socket) => {
       carton = datosGuardados.carton;
     } else {
       carton = generarCarton(estado.frases);
-      estado.tokens[twitchLogin] = { carton, marcadas: [], cantadoLinea: false, cantadoBingo: false, nombre: nombreClean };
+      estado.tokens[twitchLogin] = {
+        carton,
+        marcadas: [],
+        cantadoLinea: false,
+        cantadoBingo: false,
+        nombre: nombreClean,
+        twitchVerified: !!twUser,
+      };
     }
     estado.tokens[twitchLogin].nombre = nombreClean;
+    estado.tokens[twitchLogin].twitchVerified = !!twUser;
     const marcadasGuardadas = (datosGuardados && datosGuardados.marcadas)     || [];
     const cantadoLineaGuard = (datosGuardados && datosGuardados.cantadoLinea) || false;
     const cantadoBingoGuard = (datosGuardados && datosGuardados.cantadoBingo) || false;
@@ -1562,38 +1754,19 @@ nsJugador.on('connection', (socket) => {
 
   socket.on('jugador:actualizar-marcadas', ({ marcadas } = {}) => {
     const jugador = estado.jugadores[socket.id];
-    const ahora = Date.now();
     if (!jugador || !Array.isArray(marcadas)) return;
     registrarMetrica('marcadasEntrantes');
-
-    // Rate limit de actualizaciones de marcadas por jugador
-    const rl = rateLimits[socket.id] || { lastLinea: 0, lastBingo: 0, lastMarcadas: 0 };
-    const rateMarcadasMs = obtenerRateMarcadasMs();
-    if (ahora - (rl.lastMarcadas || 0) < rateMarcadasMs) return;
-    rl.lastMarcadas = ahora;
-    rateLimits[socket.id] = rl;
-    registrarMetrica('marcadasAceptadas');
-
-    const cartonSet   = new Set(jugador.carton.flat());
-    jugador.marcadas = marcadas
-      .filter(f => typeof f === 'string' && cartonSet.has(f))
-      .slice(0, 25);
-    if (estado.tokens[jugador.twitch]) {
-      estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
-    }
-    // Delta ligero: solo manda las marcadas actualizadas de este jugador
-    programarMarcadasParaGestor(socket.id, jugador.marcadas);
-
-    // En modo compacto, refrescar periódicamente el top enviado a gestor/moderadores.
-    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
-      scheduledGestorBroadcast();
-    }
+    aplicarMarcadasJugador(socket, jugador, marcadas);
   });
 
 function sanitizarMarcadasCarton(jugador, frescas) {
   if (Array.isArray(frescas)) {
-    const cartonSet = new Set(jugador.carton.flat());
-    jugador.marcadas = frescas.filter(f => typeof f === 'string' && cartonSet.has(f)).slice(0, 25);
+    const pendiente = marcadasPendientesRate.get(jugador.socketId);
+    if (pendiente) {
+      clearTimeout(pendiente.timer);
+      marcadasPendientesRate.delete(jugador.socketId);
+    }
+    aplicarSnapshotMarcadas(jugador, frescas);
     programarMarcadasParaGestor(jugador.socketId, jugador.marcadas);
 
     if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
@@ -1738,6 +1911,12 @@ function registrarFalloReclamo(jugador, socket) {
     }
     if (jugador) {
       console.log(`[Servidor] ${jugador.nombre} (@${jugador.twitch}) se desconectó.`);
+      const marcasPendientes = marcadasPendientesRate.get(socket.id);
+      if (marcasPendientes) {
+        clearTimeout(marcasPendientes.timer);
+        marcadasPendientesRate.delete(socket.id);
+        aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+      }
       if (estado.tokens[jugador.twitch]) {
         estado.tokens[jugador.twitch].marcadas     = jugador.marcadas;
         estado.tokens[jugador.twitch].cantadoLinea = jugador.cantadoLinea;
