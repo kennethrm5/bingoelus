@@ -1,6 +1,6 @@
 {
   "name": "bingoelus",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "Juego de bingo personalizado con frases - gestor Electron, jugadores por navegador",
   "author": "@kennethrm5",
   "main": "main.js",
@@ -32,10 +32,13 @@
           ]
         }
       ],
-      "icon": "media/joelus.ico"
+      "icon": "media/bingoelus-app-icon.ico"
     },
     "nsis": {
+      "artifactName": "Bingoelus-Setup-${version}.${ext}",
       "oneClick": true,
+      "installerIcon": "media/bingoelus-app-icon.ico",
+      "uninstallerIcon": "media/bingoelus-app-icon.ico",
       "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
@@ -45,6 +48,7 @@
       "!resultados/**",
       "!dist/**",
       "!servidor/**",
+      "!*.exe",
       "!.gitignore",
       "!*.md"
     ]

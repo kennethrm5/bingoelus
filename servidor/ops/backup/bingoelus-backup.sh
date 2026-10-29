@@ -6,7 +6,7 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-SOURCE_DIRS="${SOURCE_DIRS:-/opt/bingoelus/ganadores:/opt/bingoelus/servidor/resultados}"
+SOURCE_DIRS="${SOURCE_DIRS:-/opt/bingoelus/ganadores:/opt/bingoelus/resultados}"
 BACKUP_BASE="${BACKUP_BASE:-/opt/bingoelus/backups}"
 MIRROR_DIR="${MIRROR_DIR:-$BACKUP_BASE/live}"
 ARCHIVE_DIR="${ARCHIVE_DIR:-$BACKUP_BASE/archives}"

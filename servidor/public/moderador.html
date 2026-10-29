@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/png" href="/media/bingoelus.png" />
+  <link rel="icon" type="image/png" href="/media/bingoelus-app-icon.png?v=1" />
   <title>Bingoelus - Moderador</title>
   <style>
     /* -- Reset & Variables ----------------------------------- */
@@ -15,9 +15,9 @@
       --surface2:  #202020;
       --accent:    #e7ad18;
       --accent-h:  #ffd765;
-      --success:   #22c55e;
-      --danger:    #ef4444;
-      --warn:      #fb923c;
+      --success:   #ffd765;
+      --danger:    #d77d68;
+      --warn:      #e7ad18;
       --text:      #fbf7ea;
       --muted:     #b1a47e;
       --radius:    16px;
@@ -98,7 +98,7 @@
     #url-publica span { font-weight: 700; }
 
     /* Badge Twitch verificado */
-    .twitch-verified { color: #9147ff; font-size: .7rem; font-weight: 800; }
+    .twitch-verified { color: var(--accent-h); font-size: .7rem; font-weight: 800; }
 
     #btn-copiar {
       background: var(--accent);
@@ -115,10 +115,10 @@
     /* -- Layout principal -- */
     main {
       display: grid;
-      grid-template-columns: 340px 1fr;
-      grid-template-rows: 1fr 1fr;
-      gap: 16px;
-      padding: 16px;
+      grid-template-columns: minmax(300px, .9fr) minmax(0, 1.6fr);
+      grid-template-rows: minmax(300px, 1.15fr) minmax(240px, .85fr);
+      gap: 14px;
+      padding: 14px;
       flex: 1;
       min-height: 0;
       overflow: hidden;
@@ -128,6 +128,7 @@
     #panel-izq {
       display: flex;
       flex-direction: column;
+      grid-column: 1;
       gap: 14px;
       grid-row: 1 / 3;
       min-height: 0;
@@ -175,6 +176,24 @@
       color: var(--muted);
       margin-bottom: 12px;
     }
+    .card h2::before,
+    #panel-cartones h2::before,
+    #panel-log h2::before {
+      content: '';
+      display: inline-block;
+      vertical-align: -.12em;
+      width: 3px;
+      height: 1em;
+      margin-right: 9px;
+      border-radius: 3px;
+      background: linear-gradient(var(--accent-h), var(--accent));
+    }
+    button svg {
+      width: 17px;
+      height: 17px;
+      flex: 0 0 auto;
+      fill: currentColor;
+    }
 
     textarea {
       width: 100%;
@@ -203,6 +222,10 @@
       cursor: pointer;
       transition: background .2s, transform .1s;
       margin-top: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
     button.primary:hover  { background: var(--accent-h); }
     button.primary:active { transform: scale(.97); }
@@ -235,9 +258,9 @@
     }
     .btn-frase:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #000; }
     .btn-frase:disabled {
-      background: #1a3a1a;
-      border-color: var(--success);
-      color: var(--success);
+      background: #302610;
+      border-color: rgba(231, 173, 24, .4);
+      color: var(--accent-h);
       cursor: default;
       opacity: .85;
     }
@@ -305,11 +328,17 @@
       gap: 8px;
     }
     .jugador-chevron {
-      color: var(--muted);
-      font-size: .8rem;
+      display: block;
+      width: 8px;
+      height: 8px;
+      flex: 0 0 8px;
+      border-right: 1.5px solid var(--muted);
+      border-bottom: 1.5px solid var(--muted);
+      transform: rotate(45deg);
       transition: transform .25s;
+      margin: 0 4px 4px 12px;
     }
-    .jugador-fila.abierto .jugador-chevron { transform: rotate(180deg); }
+    .jugador-fila.abierto .jugador-chevron { transform: rotate(225deg); margin-bottom: 0; }
     /* Panel del cartón (colapsable) */
     .jugador-carton {
       max-height: 0;
@@ -343,28 +372,53 @@
       transition: background .2s, color .2s;
       gap: 2px;
     }
-    .celda.cantada {
-      background: #14532d;
-      color: #86efac;
+    .celda.cantada:not(.marcada-jugador) {
+      background: linear-gradient(145deg, #332b17, #282317);
+      color: #b79a58;
       font-weight: 600;
     }
-    /* Celda que el jugador ha marcado manualmente */
-    .celda.marcada-jugador {
-      background: #1e3a5f;
-      color: #93c5fd;
-      font-weight: 600;
-      outline: 1px solid #3b82f6;
+    .celda.marcada-jugador:not(.cantada) {
+      background: linear-gradient(145deg, #624608, #493507);
+      color: #ffdc75;
+      font-weight: 700;
+      outline: 1px solid rgba(255, 195, 55, .85);
+      box-shadow: inset 0 0 0 1px rgba(255, 219, 117, .12);
     }
-    /* Celda cantada Y marcada por el jugador */
     .celda.cantada.marcada-jugador {
-      background: linear-gradient(135deg, #14532d, #1e3a5f);
-      color: #4ade80;
-      outline: 2px solid #22c55e;
+      background: linear-gradient(145deg, #a77a16, #76560c);
+      color: #fff0b1;
+      font-weight: 700;
+      outline: 1px solid #ffe08a;
+      box-shadow: inset 0 0 0 1px rgba(255, 240, 177, .3), 0 0 8px rgba(231, 173, 24, .28);
     }
+
+    .leyenda-cartones {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      margin: -2px 0 10px;
+      color: var(--muted);
+      font-size: .7rem;
+    }
+    .leyenda-cartones span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .leyenda-cartones i {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .leyenda-cartones .swatch-cantada { background: #302a1a; border-color: #76633a; }
+    .leyenda-cartones .swatch-mal-marcada { background: #594008; border-color: #ffc337; }
+    .leyenda-cartones .swatch-correcta { background: #96700f; border-color: #ffe08a; }
 
     /* Etiqueta de Twitch */
     .twitch-tag {
-      color: #9147ff;
+      color: var(--accent-h);
       font-size: .72rem;
       font-weight: 600;
       margin-left: 4px;
@@ -383,12 +437,12 @@
       transition: background .2s;
     }
     #btn-reclamaciones.off {
-      background: #2c2700;
+      background: #211d11;
       color: var(--muted);
     }
     #btn-reclamaciones.on {
-      background: var(--success);
-      color: #000;
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      color: #090909;
     }
 
     /* Badges de estado del jugador */
@@ -400,8 +454,8 @@
       font-weight: 700;
       margin-left: 2px;
     }
-    .badge-linea { background: var(--warn);    color: #000; }
-    .badge-bingo { background: var(--success); color: #000; }
+    .badge-linea { background: #302610; color: var(--accent-h); border: 1px solid var(--border-2); }
+    .badge-bingo { background: var(--accent); color: #090909; }
 
     .jugador-acciones {
       display: flex;
@@ -411,22 +465,6 @@
       padding-top: 10px;
       border-top: 1px solid var(--border);
     }
-    .btn-declarar-ganador {
-      padding: 6px 12px;
-      font-size: .78rem;
-      font-weight: 700;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      color: #000;
-    }
-    .btn-declarar-ganador.linea { background: var(--warn); }
-    .btn-declarar-ganador.bingo { background: var(--success); }
-    .btn-declarar-ganador:disabled {
-      opacity: .45;
-      cursor: not-allowed;
-    }
-
     /* -- Log de eventos (lateral izquierdo, fila 3) ----------- */
     #panel-log {
       border-radius: var(--radius);
@@ -516,6 +554,7 @@
       color: #fecaca;
       font-size: .85rem;
     }
+    .cuenta-baneada > span { color: #e7b8aa; }
     @keyframes pulso {
       from { text-shadow: 0 0 20px currentColor; }
       to   { text-shadow: 0 0 60px currentColor, 0 0 120px currentColor; }
@@ -528,19 +567,24 @@
 
 
     #btn-claxon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       width: 100%;
       margin-top: 8px;
       padding: 9px;
       border: none;
       border-radius: 7px;
-      background: #92400e;
-      color: #fde68a;
+      background: #302610;
+      color: var(--accent-h);
+      border: 1px solid var(--border-2);
       font-size: .88rem;
       font-weight: 700;
       cursor: pointer;
       transition: background .2s;
     }
-    #btn-claxon:hover { background: #b45309; }
+    #btn-claxon:hover { background: #453613; }
 
     /* -- Overlay de conexión al servidor ---------------- */
     #overlay-conexion {
@@ -658,6 +702,44 @@
       outline: 3px solid var(--accent-h);
       outline-offset: 3px;
     }
+    @media (max-width: 1100px) {
+      body { height: auto; min-height: 100vh; overflow: auto; }
+      main {
+        grid-template-columns: minmax(280px, .9fr) minmax(0, 1.3fr);
+        grid-template-rows: minmax(320px, auto) minmax(240px, auto);
+        overflow: visible;
+      }
+        #card-frases { grid-column: 1; grid-row: 1; min-height: 280px; }
+        #panel-cartones { grid-column: 2; grid-row: 1; overflow: visible; }
+        #panel-log { grid-column: 1; grid-row: 2; min-height: 180px; }
+        #card-tracking { grid-column: 2; grid-row: 2; min-height: 240px; }
+    }
+    @media (max-width: 760px) {
+      body { height: auto; min-height: 100vh; overflow: auto; }
+      header { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+      header h1 { justify-content: center; width: 100%; }
+      header > div { width: 100%; align-items: stretch !important; }
+      #url-publica { justify-content: center; }
+      .info-bloque { flex-wrap: wrap; justify-content: center; }
+      main {
+        display: flex;
+        flex-direction: column;
+        overflow: visible;
+        padding: 10px;
+        gap: 10px;
+      }
+      #panel-izq { display: none; }
+      #panel-cartones { max-height: none; order: 0; }
+      #card-frases { order: 1; }
+      #card-tracking { order: 2; }
+      #panel-log { order: 3; }
+      #lista-jugadores { max-height: 62vh; overflow-y: auto; }
+      .jugador-cabecera { padding: 12px; }
+      .jugador-nombre { flex-wrap: wrap; }
+      #card-frases, #card-tracking { min-height: 240px; }
+      #panel-log { min-height: 180px; }
+      .connect-card { padding: 26px 22px; }
+    }
     @media (max-width: 600px) {
       header {
         flex-wrap: wrap;
@@ -710,7 +792,7 @@
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
     <div id="url-publica">
       <div class="info-bloque">
-        <span class="etiq">🔗 URL jugadores:</span>
+        <span class="etiq">URL jugadores:</span>
         <span class="valor" id="txt-url">—</span>
         <button class="btn-mini" id="btn-copiar">Copiar</button>
       </div>
@@ -725,21 +807,27 @@
 
     <!-- Configurar partida -->
     <div class="card lux-panel" id="card-config">
-      <h2>⚙️ Configurar Partida</h2>
+      <h2>Configurar partida</h2>
       <textarea
         id="input-frases"
         placeholder="Escribe las frases separadas por comas o saltos de línea.&#10;Mínimo 25 frases para un cartón 5×5.&#10;&#10;Ejemplo:&#10;Le llegó el cuento,&#10;Tenía el pelo negro,&#10;..."
       ></textarea>
       <button class="primary" id="btn-iniciar">Iniciar Partida</button>
-      <button class="primary danger" id="btn-resetear" style="margin-top:6px">🗑️ Resetear Todo</button>
-      <button id="btn-reclamaciones" class="off">🔒 Habilitar Reclamaciones (desactivado)</button>
+      <button class="primary danger" id="btn-resetear" style="margin-top:6px">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7Zm2-4h8l1 2H7l1-2Zm1 7h2v7H9v-7Zm4 0h2v7h-2v-7Z"/></svg>
+        Resetear todo
+      </button>
+      <button id="btn-reclamaciones" class="off">Habilitar reclamaciones (desactivado)</button>
       <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <label for="input-umbral" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">Casillas restantes máx. para ¡Bingo!:</label>
         <input type="number" id="input-umbral" min="0" max="25" value="0"
           style="width:58px;background:var(--bg);border:1px solid #3d3500;border-radius:5px;color:var(--text);padding:4px 8px;font-size:.85rem;outline:none;" />
         <button id="btn-umbral" style="padding:5px 12px;border:none;border-radius:5px;background:var(--accent);color:#000;cursor:pointer;font-size:.8rem;font-weight:600;">Aplicar</button>
       </div>
-      <button id="btn-claxon">📢 Tocar Claxon</button>
+      <button id="btn-claxon">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4h4l9 5V5l-9 5H3Zm15.5-2.5a6 6 0 0 1 0 9l1.4 1.4a8 8 0 0 0 0-11.8l-1.4 1.4Z"/></svg>
+        Tocar claxon
+      </button>
     </div>
 
   </aside>
@@ -747,8 +835,14 @@
   <!-- -- Jugadores (acordeón) -- -->
   <section id="panel-cartones" class="lux-panel">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-      <h2 style="margin-bottom: 0;">👥 Jugadores conectados (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
+      <h2 style="margin-bottom: 0;">Jugadores (<span id="num-jugadores">0</span>)<span id="ganadores-header"></span></h2>
       <input type="text" id="buscador-jugadores" placeholder="Buscar jugador..." style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 220px; font-size: 0.9rem;">
+    </div>
+    <div class="leyenda-cartones" aria-label="Leyenda de estados de casillas">
+      <span><i aria-hidden="true"></i>Sin cantar ni marcar</span>
+      <span><i class="swatch-cantada" aria-hidden="true"></i>Cantada, sin marcar</span>
+      <span><i class="swatch-mal-marcada" aria-hidden="true"></i>Marcada, no cantada</span>
+      <span><i class="swatch-correcta" aria-hidden="true"></i>Cantada y marcada</span>
     </div>
     <div id="lista-jugadores">
       <p style="color:var(--muted);font-size:.85rem;">Los jugadores aparecerán aquí cuando se conecten.</p>
@@ -763,13 +857,13 @@
 
   <!-- -- Log de eventos -- -->
   <section id="panel-log" class="lux-panel">
-    <h2>📋 Registro de Eventos</h2>
+    <h2>Actividad reciente</h2>
     <div id="log-eventos"></div>
   </section>
 
   <!-- -- Lista de frases cantables -- -->
   <div class="card lux-panel" id="card-frases">
-    <h2>🎯 Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
+    <h2>Frases (<span id="contador-cantadas">0</span> / <span id="contador-total">0</span> cantadas)</h2>
     <div id="lista-frases">
       <p style="color:var(--muted);font-size:.82rem;">Inicia una partida para ver las frases.</p>
     </div>
@@ -778,8 +872,11 @@
   <!-- -- Seguimiento de frases (Excel) -- -->
   <div class="card lux-panel" id="card-tracking">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h2 style="margin:0;">📊 Seguimiento de frases (Verificación)</h2>
-      <button id="btn-sync-excel" class="primary" style="max-width:180px;min-width:120px;display:inline-block;">🔄 Sincronizar Excel</button>
+      <h2 style="margin:0;">Verificación de frases</h2>
+      <button id="btn-sync-excel" class="primary" style="max-width:180px;min-width:120px;display:inline-flex;align-items:center;justify-content:center;gap:8px;">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 0 1 7.7 5.8h-2.1A6 6 0 0 0 6.2 8H9L5 12 1 8h3.1A8 8 0 0 1 12 4Zm7 8 4 4h-3.1A8 8 0 0 1 4.3 14h2.1A6 6 0 0 0 17.8 16H15l4-4Z"/></svg>
+        Sincronizar
+      </button>
     </div>
     <div id="lista-tracking" style="display:flex;flex-direction:column;gap:0;flex:1;overflow-y:auto;">
     </div>
@@ -789,7 +886,7 @@
 
 <!-- --------------- OVERLAY PREMIO --------------- -->
   <div id="overlay-premio">
-    <h2 id="overlay-tipo" style="color: var(--warn)">🎉 ¡LÍNEA!</h2>
+    <h2 id="overlay-tipo" style="color: var(--warn)">¡LÍNEA!</h2>
     <p id="overlay-ganador">Ha ganado: <strong></strong></p>
     <button id="btn-cerrar-overlay" style="margin-top:24px;padding:12px 32px;font-size:1rem;border:none;border-radius:8px;background:var(--accent);color:#000;cursor:pointer;font-weight:700">Cerrar</button>
   </div>
@@ -932,11 +1029,11 @@
     canvas.height = 1000;
     
     // Fondo oscuro
-    ctx.fillStyle = '#1e1e24';
+    ctx.fillStyle = '#101010';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     // Títulos
-    ctx.fillStyle = tipoPremio === 'Bingo' ? '#4caf50' : '#ff9800';
+    ctx.fillStyle = '#ffd765';
     ctx.font = 'bold 60px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('¡' + tipoPremio.toUpperCase() + '!', 500, 80);
@@ -982,10 +1079,10 @@
         const esCantada = cantadasSet.has(frase);
         const esMarcada = marcadasSet.has(frase);
         
-        ctx.fillStyle = esCantada ? '#4caf50' : '#2b2b36';
+        ctx.fillStyle = esCantada ? (esMarcada ? '#594411' : '#302610') : '#171613';
         ctx.fillRect(x, y, cellSize - 5, cellSize - 5);
         ctx.lineWidth = esMarcada ? 4 : 1;
-        ctx.strokeStyle = esMarcada ? '#ffeb3b' : '#111';
+        ctx.strokeStyle = esMarcada ? '#ffd765' : '#3d3500';
         ctx.strokeRect(x, y, cellSize - 5, cellSize - 5);
         
         ctx.fillStyle = esCantada ? '#fff' : '#ccc';
@@ -1015,10 +1112,10 @@
   function mostrarOverlay(tipo, ganador, twitch) {
     const etiqueta = twitch ? `${ganador} <small style=\"opacity:.7\">@${twitch}</small>` : ganador;
     if (tipo === 'bingo') {
-      overlayTipo.textContent    = '🏆 ¡BINGO!';
+      overlayTipo.textContent    = '¡BINGO!';
       overlayTipo.style.color    = 'var(--success)';
     } else {
-      overlayTipo.textContent    = '🎉 ¡LÍNEA!';
+      overlayTipo.textContent    = '¡LÍNEA!';
       overlayTipo.style.color    = 'var(--warn)';
     }
     overlayGanador.innerHTML = `Ha ganado: <strong>${etiqueta}</strong>`;
@@ -1041,10 +1138,10 @@
     reclamacionesActivas = activas;
     const btn = document.getElementById('btn-reclamaciones');
     if (activas) {
-      btn.textContent = '🔓 Deshabilitar Reclamaciones (activo)';
+      btn.textContent = 'Deshabilitar reclamaciones (activo)';
       btn.className   = 'on';
     } else {
-      btn.textContent = '🔒 Habilitar Reclamaciones (desactivado)';
+      btn.textContent = 'Habilitar reclamaciones (desactivado)';
       btn.className   = 'off';
     }
   }
@@ -1087,10 +1184,18 @@
 
       if (cantadasSet.has(frase)) {
         const btnD = document.createElement('button');
-        btnD.textContent = '✖';
+        btnD.type = 'button';
+        btnD.setAttribute('aria-label', `Desmarcar frase: ${frase}`);
         btnD.title = `Desmarcar: ${frase}`;
-        btnD.style.cssText = 'padding:6px 9px;border:1px solid var(--danger);border-radius:7px;background:transparent;color:var(--danger);cursor:pointer;font-size:.8rem;flex-shrink:0;line-height:1;transition:background .15s;';
-        btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(239,68,68,.15)'; });
+        const clearIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        clearIcon.setAttribute('viewBox', '0 0 16 16');
+        clearIcon.setAttribute('aria-hidden', 'true');
+        const clearPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        clearPath.setAttribute('d', 'M4 3 3 4l5 4-5 4 1 1 4-4 4 4 1-1-4-4 4-4-1-1-4 4-4-4z');
+        clearIcon.appendChild(clearPath);
+        btnD.appendChild(clearIcon);
+        btnD.style.cssText = 'padding:7px 9px;border:1px solid var(--border-2);border-radius:9px;background:transparent;color:var(--accent-h);cursor:pointer;font-size:.8rem;flex-shrink:0;line-height:1;transition:background .15s;';
+        btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(231,173,24,.12)'; });
         btnD.addEventListener('mouseout',  () => { btnD.style.background = 'transparent'; });
         btnD.addEventListener('click', () => {
           socket.emit('gestor:desmarcar-frase', { frase });
@@ -1173,13 +1278,13 @@
 
         const actualizarEstilo = (sel) => {
           if (sel.value === 'verificada') {
-            sel.style.background = '#a8e6cf'; // Verde suave
-            sel.style.color = '#1b5e20';
-            sel.style.border = '1px solid #81c784';
+            sel.style.background = '#302610';
+            sel.style.color = '#ffe28a';
+            sel.style.border = '1px solid rgba(231, 173, 24, .5)';
           } else {
-            sel.style.background = '#ffcc80'; // Naranja/Rojo clarito
-            sel.style.color = '#bf360c';
-            sel.style.border = '1px solid #ffab40';
+            sel.style.background = '#171613';
+            sel.style.color = 'var(--muted)';
+            sel.style.border = '1px solid rgba(231, 173, 24, .2)';
           }
         };
 
@@ -1259,7 +1364,7 @@
       // Avatar inicial
       const avatar = document.createElement('span');
       avatar.textContent = j.nombre.charAt(0).toUpperCase();
-      avatar.style.cssText = 'background:var(--accent);color:#fff;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0';
+      avatar.style.cssText = 'background:var(--accent);color:#090909;width:30px;height:30px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800;flex-shrink:0';
       nombreEl.appendChild(avatar);
 
       const textoNombre = document.createElement('span');
@@ -1305,7 +1410,6 @@
 
       const chevron = document.createElement('span');
       chevron.className   = 'jugador-chevron';
-      chevron.textContent = '▼';
 
       cabecera.appendChild(nombreEl);
       cabecera.appendChild(chevron);
@@ -1345,7 +1449,9 @@
           const span = document.createElement('span');
           span.textContent = frase;
           celda.appendChild(span);
-          celda.title       = esMarcada ? `? Marcada: ${frase}` : frase;
+          celda.title = esMarcada
+            ? esCantada ? `Marcada por el jugador y cantada: ${frase}` : `Marcada por el jugador, pero aún no cantada: ${frase}`
+            : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : frase;
           grid.appendChild(celda);
         });
       });
@@ -1355,43 +1461,13 @@
       const acciones = document.createElement('div');
       acciones.className = 'jugador-acciones';
 
-      if (estadoLocal.partidaActiva) {
-        if (!j.cantadoLinea) {
-          const btnLinea = document.createElement('button');
-          btnLinea.type = 'button';
-          btnLinea.className = 'btn-declarar-ganador linea';
-          btnLinea.textContent = '🎉 Declarar LÍNEA';
-          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
-          btnLinea.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar LÍNEA para ${j.nombre}?`)) return;
-            socket.emit('gestor:declarar-linea', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnLinea);
-        }
-
-        if (!j.cantadoBingo) {
-          const btnBingo = document.createElement('button');
-          btnBingo.type = 'button';
-          btnBingo.className = 'btn-declarar-ganador bingo';
-          btnBingo.textContent = '🏆 Declarar BINGO';
-          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
-          btnBingo.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar BINGO para ${j.nombre}?`)) return;
-            socket.emit('gestor:declarar-bingo', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnBingo);
-        }
-      }
-
       const loginTwitch = typeof j.twitch === 'string' ? j.twitch.trim() : '';
       const cuentaTwitchReal = loginTwitch.length > 0 && j.twitchVerified !== false;
       if (cuentaTwitchReal && !j.baneado) {
         const btnBanear = document.createElement('button');
         btnBanear.type = 'button';
         btnBanear.className = 'btn-banear';
-        btnBanear.textContent = '⛔ Banear';
+        btnBanear.textContent = 'Banear';
         btnBanear.title = 'Expulsar al jugador y bloquear esta cuenta de Twitch permanentemente';
         btnBanear.addEventListener('click', (ev) => {
           ev.stopPropagation();
@@ -1501,8 +1577,8 @@
     const el = document.getElementById('ganadores-header');
     if (!el) return;
     const partes = [];
-    if (ganLinea.length) partes.push(`<span class="ganador-linea">🎉 ${ganLinea.join(', ')}</span>`);
-    if (ganBingo.length) partes.push(`<span class="ganador-bingo">🏆 ${ganBingo.join(', ')}</span>`);
+    if (ganLinea.length) partes.push(`<span class="ganador-linea">${ganLinea.join(', ')}</span>`);
+    if (ganBingo.length) partes.push(`<span class="ganador-bingo">${ganBingo.join(', ')}</span>`);
     el.innerHTML = partes.length ? ' — ' + partes.join('  ') : '';
   }
 
@@ -1586,10 +1662,10 @@
             if (select.value !== nuevoValor) {
               select.value = nuevoValor;
               if (nuevoValor === 'verificada') {
-                select.style.background = '#a8e6cf'; select.style.color = '#1b5e20'; select.style.border = '1px solid #81c784';
+                select.style.background = '#302610'; select.style.color = '#ffe28a'; select.style.border = '1px solid rgba(231, 173, 24, .5)';
 
               } else {
-                select.style.background = '#ffcc80'; select.style.color = '#bf360c'; select.style.border = '1px solid #ffab40';
+                select.style.background = '#171613'; select.style.color = 'var(--muted)'; select.style.border = '1px solid rgba(231, 173, 24, .2)';
               }
             }
           });
@@ -1674,7 +1750,9 @@
         const esCantada = cantadasSet.has(frase);
         const esMarcada = marcadasSet.has(frase);
         celda.className = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
-        celda.title = esMarcada ? `? Marcada: ${frase}` : frase;
+        celda.title = esMarcada
+          ? esCantada ? `Cantada y marcada por el jugador: ${frase}` : `Marcada por el jugador, pero no cantada: ${frase}`
+          : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : `Sin cantar ni marcar: ${frase}`;
       });
     }
 
@@ -1683,9 +1761,8 @@
   });
 
   // Línea válida
-  socket.on('partida:linea-valida', ({ ganador, twitch, manual }) => {
-    const sufijoManual = manual ? ' (declarada manualmente)' : '';
-    agregarLog(`🎉 ¡LÍNEA! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}${sufijoManual}`, 'ok');
+  socket.on('partida:linea-valida', ({ ganador, twitch }) => {
+    agregarLog(`¡LÍNEA! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}`, 'ok');
     reproducirClaxon(false);
     mostrarOverlay('linea', ganador, twitch);
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
@@ -1698,9 +1775,8 @@
   });
 
   // Bingo válido
-  socket.on('partida:bingo-valido', ({ ganador, twitch, manual }) => {
-    const sufijoManual = manual ? ' (declarado manualmente)' : '';
-    agregarLog(`🏆 ¡BINGO! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}${sufijoManual}. El gestor decide si continuar.`, 'ok');
+  socket.on('partida:bingo-valido', ({ ganador, twitch }) => {
+    agregarLog(`¡BINGO! ${ganador}${twitch ? ' (@' + twitch + ')' : ''}. El gestor decide si continuar.`, 'ok');
     reproducirClaxon(true);
     mostrarOverlay('bingo', ganador, twitch);
     const jug = estadoLocal.jugadores.find(j => j.nombre === ganador);
@@ -1717,13 +1793,13 @@
   socket.on('partida:juego-terminado', ({ ganadores }) => {
     estadoLocal.partidaActiva = false;
     const lista = ganadores.length > 0 ? ganadores.join(', ') : 'ninguno';
-    agregarLog(`🏆 Partida finalizada. Ganadores de Bingo: ${lista}`, 'ok');
+    agregarLog(`Partida finalizada. Ganadores de Bingo: ${lista}`, 'ok');
   });
 
   // Actualización del estado de reclamaciones
   socket.on('partida:reclamaciones-actualizadas', ({ habilitadas }) => {
     actualizarBotonReclamaciones(habilitadas);
-    agregarLog(habilitadas ? '🔓 Reclamaciones habilitadas.' : '🔒 Reclamaciones deshabilitadas.', habilitadas ? 'ok' : 'warn');
+    agregarLog(habilitadas ? 'Reclamaciones habilitadas.' : 'Reclamaciones deshabilitadas.', habilitadas ? 'ok' : 'warn');
   });
 
     // Error del servidor

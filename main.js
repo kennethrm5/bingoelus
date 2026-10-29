@@ -9,6 +9,8 @@ const path    = require('path');
 const http    = require('http');
 const express = require('express');
 
+app.setAppUserModelId('com.kennethrm5.bingoelus');
+
 let portLocal;
 
 // Servidor Express mínimo: solo sirve el HTML del gestor y los archivos de media
@@ -28,13 +30,22 @@ function crearVentana() {
     width: 1280,
     height: 860,
     title: 'Bingoelus — Gestor',
-    icon: path.join(__dirname, 'media', 'bingoelus.png'),
+    icon: path.join(__dirname, 'media', 'bingoelus-app-icon.png'),
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#11100c',
+      symbolColor: '#f5b800',
+      height: 38,
+    },
+    backgroundColor: '#090909',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
+  mainWindow.removeMenu();
   mainWindow.loadURL(`http://127.0.0.1:${portLocal}/gestor`);
 
   mainWindow.on('closed', () => {
