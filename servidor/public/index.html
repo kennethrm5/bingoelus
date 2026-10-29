@@ -6,23 +6,24 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="icon" type="image/x-icon" href="/media/joelus.ico" />  <title>Bingoelus 🎱</title>
+  <link rel="icon" type="image/png" href="/media/bingoelus-app-icon.png?v=1" />
+  <title>Bingoelus - Jugadores</title>
   <style>
     /* ── Reset & Variables ─────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0d0b00;
-      --surface:  #181400;
-      --surface2: #221e00;
-      --accent:   #f5b800;
-      --accent-h: #ffd44d;
-      --success:  #22c55e;
-      --danger:   #ef4444;
-      --warn:     #fb923c;
-      --text:     #fdf6d8;
-      --muted:    #9a8040;
-      --radius:   12px;
+      --bg:       #090909;
+      --surface:  #151515;
+      --surface2: #202020;
+      --accent:   #e7ad18;
+      --accent-h: #ffd765;
+      --success:  #ffd765;
+      --danger:   #d77d68;
+      --warn:     #e7ad18;
+      --text:     #fbf7ea;
+      --muted:    #b1a47e;
+      --radius:   16px;
     }
 
     body {
@@ -99,8 +100,8 @@
       width: 100%;
       padding: 16px 20px;
       border-radius: var(--radius);
-      background: #1f0a3c;
-      border: 1px solid #9147ff66;
+      background: linear-gradient(145deg, #241d0f, #15120b);
+      border: 1px solid rgba(231, 173, 24, .38);
       display: none;
       align-items: center;
       gap: 14px;
@@ -109,24 +110,24 @@
       width: 52px;
       height: 52px;
       border-radius: 50%;
-      background: #9147ff;
+      background: var(--accent);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 1.4rem;
       font-weight: 700;
-      color: #fff;
+      color: #090909;
       flex-shrink: 0;
     }
     #twitch-card-info { flex: 1; }
     #twitch-card-name {
       font-size: 1.1rem;
       font-weight: 700;
-      color: #fff;
+      color: var(--text);
     }
     #twitch-card-login {
       font-size: .85rem;
-      color: #9147ff;
+      color: var(--accent-h);
       font-weight: 600;
     }
     #twitch-logout {
@@ -261,6 +262,17 @@
       font-size: .82rem;
       color: var(--muted);
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    #reglas-resumen span::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(231, 173, 24, .4);
     }
     #btn-aceptar-reglas {
       width: 100%;
@@ -306,7 +318,7 @@
       background: var(--surface2);
       color: var(--muted);
     }
-    #estado-partida.activa   { background: #14532d; color: var(--success); }
+    #estado-partida.activa   { background: #302610; color: var(--success); border: 1px solid rgba(231, 173, 24, .36); }
     #estado-partida.finalizada { background: #450a0a; color: var(--danger); }
 
     /* Cartón 5×5 */
@@ -347,9 +359,9 @@
     }
     /* Estado: penalizada por clicks en no-cantada */
     .celda-jugador.penalizada {
-      background: linear-gradient(135deg, #450a0a, #7f1d1d);
-      border-color: #ef4444;
-      color: #fca5a5;
+      background: linear-gradient(135deg, #3a211c, #542a20);
+      border-color: var(--danger);
+      color: #f1b6a7;
       cursor: not-allowed;
       box-shadow: 0 0 10px rgba(239,68,68,.5);
     }
@@ -359,7 +371,7 @@
       right: 6px;
       font-size: .75rem;
       font-weight: 700;
-      color: #ef4444;
+      color: var(--danger);
       background: rgba(0,0,0,.55);
       border-radius: 4px;
       padding: 1px 5px;
@@ -387,7 +399,7 @@
       transition: background .3s ease;
     }
     .celda-con-foto.marcada::before {
-      background: rgba(34, 197, 94, 0.15);
+      background: rgba(231, 173, 24, 0.2);
     }
     .celda-con-foto.penalizada::before {
       background: rgba(69, 10, 10, 0.88);
@@ -410,8 +422,8 @@
          0    0   8px rgba(0,0,0,.7);
     }
     /* Overrides de color por estado — sobre el span directamente */
-    .celda-jugador.marcada    span { color: #86efac; }
-    .celda-jugador.penalizada span { color: #fca5a5; }
+    .celda-jugador.marcada    span { color: #ffe28a; }
+    .celda-jugador.penalizada span { color: #f1b6a7; }
     @keyframes shake {
       0%,100% { transform: translateX(0); }
       20%      { transform: translateX(-6px); }
@@ -426,18 +438,18 @@
     }
     /* Estado: marcada por el jugador — tachada con énfasis */
     .celda-jugador.marcada {
-      background: linear-gradient(135deg, #14532d, #166534);
-      border-color: var(--success);
+      background: linear-gradient(145deg, #594411, #392c0d);
+      border-color: rgba(255, 215, 101, .72);
       font-weight: 700;
       text-decoration: line-through;
-      text-decoration-color: #86efac99;
-      box-shadow: 0 0 12px rgba(34,197,94,.4);
+      text-decoration-color: rgba(255, 226, 138, .6);
+      box-shadow: 0 0 12px rgba(231, 173, 24, .22);
       cursor: default;
       animation: pulso-boton 1.4s ease-in-out infinite alternate;
     }
     @keyframes pulso-boton {
-      from { box-shadow: 0 0 6px 2px rgba(255,255,255,.2); }
-      to   { box-shadow: 0 0 22px 6px rgba(255,255,255,.5); }
+      from { box-shadow: 0 0 6px 1px rgba(231,173,24,.12); }
+      to   { box-shadow: 0 0 16px 2px rgba(231,173,24,.3); }
     }
     @keyframes aparecer {
       from { transform: scale(.9); opacity: .4; }
@@ -459,17 +471,23 @@
       font-weight: 700;
       cursor: pointer;
       transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
     }
     #btn-linea {
-      background: var(--warn);
-      color: #000;
+      background: #302610;
+      border: 1px solid rgba(231, 173, 24, .42);
+      color: var(--accent-h);
     }
-    #btn-linea:hover  { background: #fcd34d; }
+    #btn-linea:hover  { background: #453613; }
     #btn-bingo {
-      background: var(--success);
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      border: 1px solid rgba(255, 215, 101, .55);
       color: #000;
     }
-    #btn-bingo:hover  { background: #4ade80; }
+    #btn-bingo:hover  { background: #ffe49a; }
     /* Bloqueo global durante penalización de casilla */
     #carton.bloqueado { pointer-events: none; }
     #carton.bloqueado .celda-jugador:not(.penalizada) { opacity: 0.35; filter: grayscale(60%); }
@@ -509,8 +527,8 @@
       font-weight: 700;
       font-size: .92rem;
     }
-    #banner-anuncio.linea { background: #451a0333; border: 1px solid var(--warn);    color: var(--warn); }
-    #banner-anuncio.bingo { background: #052e1633; border: 1px solid var(--success); color: var(--success); }
+    #banner-anuncio.linea { background: rgba(231, 173, 24, .07); border: 1px solid var(--warn); color: var(--warn); }
+    #banner-anuncio.bingo { background: rgba(231, 173, 24, .1); border: 1px solid var(--success); color: var(--success); }
 
     /* ── Scrollbar ─────────────────────────────────────── */
     ::-webkit-scrollbar       { width: 4px; }
@@ -539,7 +557,7 @@
     #modal-premio p {
       font-size: 1.5rem;
       font-weight: 900;
-      color: #fff;
+      color: #090909;
       text-shadow: 0 0 20px currentColor;
       max-width: 380px;
     }
@@ -550,7 +568,7 @@
       border: none;
       border-radius: var(--radius);
       background: var(--accent);
-      color: #fff;
+      color: #090909;
       font-size: 1.05rem;
       font-weight: 700;
       cursor: pointer;
@@ -734,9 +752,281 @@
     @media (hover: none) {
       #pantalla-login button:hover  { background: var(--accent); }
       #btn-aceptar-reglas:hover     { background: var(--accent); }
-      #btn-linea:hover  { background: var(--warn); }
+      #btn-linea:hover  { background: #453613; }
       #btn-bingo:hover  { background: var(--success); }
       .celda-jugador    { -webkit-tap-highlight-color: transparent; }
+    }
+
+    /* ── Acabado visual y canales oficiales ─────────────── */
+    body {
+      background:
+        radial-gradient(ellipse at 50% -18%, rgba(231, 173, 24, .17), transparent 52%),
+        var(--bg);
+    }
+    header {
+      position: relative;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 18px 24px;
+      background: rgba(15, 15, 15, .92);
+      border-bottom-color: rgba(231, 173, 24, .2);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .28);
+    }
+    header h1 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: clamp(1.25rem, 4vw, 1.65rem);
+      letter-spacing: .12em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .brand-logo {
+      width: clamp(68px, 8vw, 92px);
+      height: clamp(68px, 8vw, 92px);
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 0 12px rgba(231, 173, 24, .3));
+    }
+    .brand-tagline {
+      color: var(--muted);
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .2em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    #contenido {
+      flex: 1 0 auto;
+      width: 100%;
+      min-height: clamp(300px, 42vh, 520px);
+      justify-content: center;
+      padding: clamp(22px, 4vw, 42px) 16px;
+    }
+    #pantalla-login,
+    #reglas-card {
+      border: 1px solid rgba(231, 173, 24, .2);
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .32), inset 0 1px rgba(255, 255, 255, .035);
+    }
+    #pantalla-login { padding: clamp(20px, 5vw, 34px); border-radius: 22px; }
+    #pantalla-login button,
+    #btn-aceptar-reglas {
+      border: 1px solid rgba(255, 215, 101, .35);
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-h), var(--accent));
+      box-shadow: 0 8px 22px rgba(231, 173, 24, .18);
+      transition: background .2s, transform .15s, box-shadow .2s;
+    }
+    #pantalla-login button:hover,
+    #btn-aceptar-reglas:hover {
+      background: var(--accent-h);
+      box-shadow: 0 10px 28px rgba(231, 173, 24, .28);
+    }
+    #reglas-card { border-color: rgba(231, 173, 24, .2); border-radius: 20px; }
+    #reglas-card .regla + .regla {
+      padding-top: 14px;
+      border-top: 1px solid rgba(231, 173, 24, .12);
+    }
+    #reglas-resumen {
+      border: 1px solid rgba(231, 173, 24, .14);
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(231, 173, 24, .08), rgba(20, 20, 20, .8));
+    }
+    #cabecera-juego {
+      border: 1px solid rgba(231, 173, 24, .2);
+      border-radius: 18px;
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .22);
+    }
+    #pantalla-juego { gap: clamp(12px, 2.5vh, 18px); }
+    .celda-jugador {
+      border-width: 1px;
+      border-color: rgba(231, 173, 24, .22);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(27, 27, 27, .98), rgba(15, 15, 15, .98));
+      box-shadow: inset 0 1px rgba(255, 255, 255, .025), 0 6px 18px rgba(0, 0, 0, .18);
+    }
+    .celda-jugador.marcada {
+      border-color: rgba(255, 215, 101, .72);
+      box-shadow: 0 0 16px rgba(231, 173, 24, .14), inset 0 1px rgba(255, 255, 255, .04);
+    }
+    #acciones button {
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, .22);
+      transition: transform .15s, box-shadow .2s, filter .2s;
+    }
+    #acciones button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 26px rgba(0, 0, 0, .3);
+      filter: brightness(1.06);
+    }
+    #acciones button:active { transform: scale(.98); }
+    #carton { perspective: 900px; }
+    #acciones svg { width: 20px; height: 20px; fill: currentColor; flex: 0 0 auto; }
+    #pantalla-juego { width: min(100%, 760px); }
+    #carton { gap: clamp(4px, 1vw, 8px); }
+    .celda-jugador { min-width: 0; overflow: hidden; }
+    #acciones button { min-height: 52px; }
+    #pantalla-login button:focus-visible,
+    #btn-aceptar-reglas:focus-visible,
+    #acciones button:focus-visible,
+    .social-card:focus-visible {
+      outline: 3px solid var(--accent-h);
+      outline-offset: 3px;
+    }
+    .social-footer {
+      width: 100%;
+      padding: 22px 16px max(24px, env(safe-area-inset-bottom));
+      border-top: 1px solid rgba(231, 173, 24, .18);
+      background: rgba(12, 12, 12, .92);
+    }
+    .social-inner { width: min(100%, 1040px); margin: 0 auto; }
+    .social-heading { margin-bottom: 14px; text-align: center; }
+    .social-eyebrow {
+      color: var(--accent);
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+    .social-heading h2 {
+      margin: 4px 0;
+      color: var(--text);
+      font-size: clamp(1.05rem, 3vw, 1.35rem);
+    }
+    .social-heading p { color: var(--muted); font-size: .82rem; }
+    .social-section + .social-section { margin-top: 18px; }
+    .social-section h3 {
+      margin-bottom: 8px;
+      color: var(--accent-h);
+      font-size: .78rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .social-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+      gap: 9px;
+    }
+    .social-card {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid rgba(231, 173, 24, .16);
+      border-radius: 12px;
+      background: linear-gradient(145deg, #1a1a1a, #111);
+      color: var(--text);
+      text-decoration: none;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+    .social-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 215, 101, .56);
+      background: linear-gradient(145deg, #242016, #15130e);
+    }
+    .social-icon {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 42px;
+      place-items: center;
+      border: 1px solid rgba(255, 215, 101, .3);
+      border-radius: 10px;
+      background: rgba(231, 173, 24, .1);
+      color: var(--accent-h);
+    }
+    .social-icon svg {
+      width: 23px;
+      height: 23px;
+      fill: currentColor;
+    }
+    .social-icon.instagram,
+    .social-icon.tiktok,
+    .social-icon.x-twitter,
+    .social-icon.discord,
+    .social-icon.twitch,
+    .social-icon.kick,
+    .social-icon.rumble { color: var(--accent-h); }
+    .social-avatar-wrap {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+    }
+    .social-avatar {
+      display: block;
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(255, 215, 101, .42);
+      border-radius: 50%;
+      background: var(--surface2);
+      object-fit: cover;
+    }
+    .social-avatar-wrap .youtube-mark {
+      position: absolute;
+      right: -4px;
+      bottom: -3px;
+      width: 19px;
+      height: 15px;
+      padding: 3px 4px;
+      border: 1px solid #111;
+      border-radius: 5px;
+      background: #302610;
+      color: var(--accent-h);
+    }
+    .youtube-mark svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      fill: currentColor;
+    }
+    .social-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+    .social-copy strong {
+      overflow: hidden;
+      font-size: .77rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .social-copy span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: .67rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    @media (max-width: 700px) {
+      .social-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .social-footer { padding-top: 18px; }
+      .social-heading { margin-bottom: 11px; }
+      .social-section + .social-section { margin-top: 14px; }
+      .social-copy strong,
+      .social-copy span {
+        display: -webkit-box;
+        overflow: hidden;
+        white-space: normal;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        text-overflow: clip;
+      }
+    }
+    @media (max-width: 380px) {
+      #contenido { min-height: 300px; }
+      .brand-logo { width: 64px; height: 64px; }
+      .social-card { gap: 7px; padding: 9px 8px; }
+      .social-icon { width: 34px; height: 34px; flex-basis: 34px; }
+      .social-icon svg { width: 19px; height: 19px; }
+      .social-avatar-wrap, .social-avatar { width: 36px; height: 36px; }
+      .social-avatar-wrap { flex-basis: 36px; }
+      .social-copy strong { font-size: .71rem; }
+      .social-copy span { font-size: .63rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
 
   </style>
@@ -744,7 +1034,8 @@
 <body>
 
 <header>
-  <h1>🎱 Bingoelus</h1>
+  <h1><img class="brand-logo" src="/media/bingoelus.png" alt="" /><span>Bingo De Recorte</span></h1>
+  <p class="brand-tagline">¡Se viene prime!</p>
 </header>
 
 <div id="contenido">
@@ -753,7 +1044,7 @@
 <div id="modal-premio">
   <img id="modal-premio-img" src="" alt="Premio" />
   <p id="modal-premio-msg"></p>
-  <button id="modal-premio-btn">Continuar ▶</button>
+  <button id="modal-premio-btn">Continuar</button>
 </div>
 
 <!-- ════════ NOTIFICACIÓN FLOTANTE ════════ -->
@@ -763,7 +1054,7 @@
 <div id="pantalla-login">
 
   <!-- Estado: verificando sesión / errores OAuth -->
-  <div id="twitch-loading">🟣 Verificando sesión de Twitch...</div>
+  <div id="twitch-loading">Verificando sesión de Twitch...</div>
 
   <!-- Tarjeta Twitch (visible al confirmarse la sesión) -->
   <div id="twitch-card">
@@ -777,21 +1068,21 @@
 
   <!-- Paso Discord (visible tras confirmar sesión Twitch) -->
   <div id="discord-step">
-    <label for="input-discord">👾 ¿Cuál es tu nombre en el servidor de Discord?</label>
+    <label for="input-discord">¿Cuál es tu nombre en el servidor de Discord?</label>
     <input id="input-discord" type="text" placeholder="Tu nombre en Discord" maxlength="32" autocomplete="off" />
     <span id="discord-error">Debes introducir tu nombre de Discord para poder jugar.</span>
   </div>
 
-  <button id="btn-entrar" style="display:none">▶ Entrar al juego</button>
+  <button id="btn-entrar" style="display:none">Entrar al juego</button>
   <div id="msg-espera" style="display:none">
-    ⏳ Esperando que el gestor inicie una partida...
+    Esperando que el gestor inicie una partida...
   </div>
 </div>
 
 <!-- ════════ PANTALLA DE REGLAS ════════ -->
 <div id="pantalla-reglas">
   <div id="reglas-card">
-    <h2>🎱 <span>Cómo Jugar</span> — BINGOELUS</h2>
+    <h2><span>Cómo jugar</span> — BINGOELUS</h2>
 
     <div class="regla">
       <div class="regla-num">1</div>
@@ -842,14 +1133,14 @@
     </div>
 
     <div id="reglas-resumen">
-      <span>👁 Mira el stream</span>
-      <span>✅ Marca lo que haya pasado</span>
-      <span>⏳ Evita el spam al hacer clics</span>
-      <span>🏆 Reclama ¡Línea! o ¡Bingo! a tiempo</span>
+      <span>Mira el stream</span>
+      <span>Marca lo que haya pasado</span>
+      <span>Evita el spam al hacer clics</span>
+      <span>Reclama ¡Línea! o ¡Bingo! a tiempo</span>
     </div>
   </div>
 
-  <button id="btn-aceptar-reglas">¡Entendido, a jugar! 🎱</button>
+  <button id="btn-aceptar-reglas">Entendido, a jugar</button>
 </div>
 
 <!-- ════════ PANTALLA DE JUEGO ════════ -->
@@ -865,14 +1156,116 @@
   <div id="carton"></div>
 
   <div id="acciones">
-    <button id="btn-linea">🎉 ¡Línea!</button>
-    <button id="btn-bingo">🏆 ¡Bingo!</button>
+    <button id="btn-linea">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h3v3H4V5Zm6 0h3v3h-3V5Zm6 0h3v3h-3V5ZM4 10.5h3v3H4v-3Zm6 0h3v3h-3v-3Zm6 0h3v3h-3v-3ZM4 16h3v3H4v-3Zm6 0h3v3h-3v-3Zm6 0h3v3h-3v-3Z"/></svg>
+      <span>¡Línea!</span>
+    </button>
+    <button id="btn-bingo">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v2a5 5 0 0 1-4 4.9V13h3v2H8v-2h3v-3.1A5 5 0 0 1 7 5V3Zm-3 1h2v2a3 3 0 0 0 2.2 2.9l-.5 1.9A5 5 0 0 1 4 6V4Zm14 0h2v2a5 5 0 0 1-3.7 4.8l-.5-1.9A3 3 0 0 0 18 6V4ZM6 19h12v2H6v-2Z"/></svg>
+      <span>¡Bingo!</span>
+    </button>
   </div>
 
+</div><!-- fin #pantalla-juego -->
 </div><!-- fin #contenido -->
+
+<footer class="social-footer" aria-label="Redes sociales y canales oficiales">
+  <div class="social-inner">
+    <div class="social-heading">
+      <span class="social-eyebrow">La comunidad de Joelus</span>
+      <h2>El directo continúa en sus canales</h2>
+      <p>Sigue a Joelus y descubre sus vídeos, directos y contenido fitness.</p>
+    </div>
+    <section class="social-section" aria-labelledby="social-networks-title">
+      <h3 id="social-networks-title">Redes sociales</h3>
+      <nav class="social-grid" aria-label="Redes sociales de Joelus">
+        <a class="social-card" href="https://www.instagram.com/joelus/" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon instagram" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7Zm5 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.5-3a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>Instagram</strong><span>@joelus · Sigue sus novedades</span></span>
+        </a>
+        <a class="social-card" href="https://www.tiktok.com/@joelusfitness" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon tiktok" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M19.6 7.1a7.3 7.3 0 0 1-4.5-1.6v8.1a6.3 6.3 0 1 1-5.5-6.2v3.4a2.9 2.9 0 1 0 2.1 2.8V2h3.4c.2 2.5 1.9 4.4 4.5 4.7v.4Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>TikTok</strong><span>@joelusfitness</span></span>
+        </a>
+        <a class="social-card" href="https://x.com/JoelusFitness" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon x-twitter" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M18.9 2H22l-6.8 7.8L23.2 22h-6.3L12 14.8 5.7 22H2.5l7.3-8.4L2 2h6.5l4.4 6.6L18.9 2Zm-1.1 18h1.7L7.5 3.9H5.7L17.8 20Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>X</strong><span>@JoelusFitness</span></span>
+        </a>
+        <a class="social-card" href="https://discord.gg/mCyFc4b64" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon discord" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M19.7 5.1a18 18 0 0 0-4.4-1.4l-.6 1.2a16.5 16.5 0 0 0-5.4 0l-.6-1.2a18 18 0 0 0-4.4 1.4C1.5 9.2.7 13.2 1.1 17.2a18 18 0 0 0 5.4 2.7l1.2-2a11.7 11.7 0 0 1-1.9-.9l.5-.4c3.7 1.7 7.7 1.7 11.4 0l.5.4a11.7 11.7 0 0 1-1.9.9l1.2 2a18 18 0 0 0 5.4-2.7c.5-4.6-.8-8.5-3.2-12.1ZM8.8 14.9c-1.1 0-2-.9-2-2.1s.9-2.1 2-2.1 2 .9 2 2.1-.9 2.1-2 2.1Zm6.4 0c-1.1 0-2-.9-2-2.1s.9-2.1 2-2.1 2 .9 2 2.1-.9 2.1-2 2.1Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>Discord</strong><span>Únete a la comunidad</span></span>
+        </a>
+      </nav>
+    </section>
+    <section class="social-section" aria-labelledby="social-streaming-title">
+      <h3 id="social-streaming-title">Streaming</h3>
+      <nav class="social-grid" aria-label="Canales de streaming de Joelus">
+        <a class="social-card" href="https://www.twitch.tv/joelusfitness" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon twitch" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 2 1.5 6v15h5v3h4l3-3h4l5.5-5.5V2H4Zm16 12.5L17 17h-5l-3 3v-3H4V4h16v10.5ZM11 7h2v6h-2V7Zm5 0h2v6h-2V7Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>Twitch</strong><span>JoelusFitness · Directos Principales</span></span>
+        </a>
+        <a class="social-card" href="https://kick.com/joelus" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon kick" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 2h5v7l6.3-7h6.2l-7.2 8.2L22 22h-6.1l-5.2-7.1L9 16.8V22H4V2Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>Kick</strong><span>Joelus</span></span>
+        </a>
+        <a class="social-card" href="https://rumble.com/user/joeluscommunis" target="_blank" rel="noopener noreferrer">
+          <span class="social-icon rumble" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 2h10a6 6 0 0 1 1.5 11.8L22 22h-6.2l-5.8-8H9v8H4V2Zm5 5v2h5a1 1 0 0 0 0-2H9Z"/></svg>
+          </span>
+          <span class="social-copy"><strong>Rumble</strong><span>Joelus Communis</span></span>
+        </a>
+      </nav>
+    </section>
+    <section class="social-section" aria-labelledby="social-youtube-title">
+      <h3 id="social-youtube-title">Canales de YouTube</h3>
+      <nav class="social-grid" aria-label="Canales de YouTube de Joelus">
+        <a class="social-card" href="https://www.youtube.com/@Joelus" target="_blank" rel="noopener noreferrer">
+          <span class="social-avatar-wrap" aria-hidden="true">
+            <img class="social-avatar" src="media/social/joelus.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
+          </span>
+          <span class="social-copy"><strong>Joelus</strong><span>Reacciones y chismes</span></span>
+        </a>
+        <a class="social-card" href="https://www.youtube.com/@JoelusFitness" target="_blank" rel="noopener noreferrer">
+          <span class="social-avatar-wrap" aria-hidden="true">
+            <img class="social-avatar" src="media/social/joelus-fitness.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
+          </span>
+          <span class="social-copy"><strong>JoelusFitness</strong><span>Vlogs y dieta</span></span>
+        </a>
+        <a class="social-card" href="https://www.youtube.com/@Joelus2.0" target="_blank" rel="noopener noreferrer">
+          <span class="social-avatar-wrap" aria-hidden="true">
+            <img class="social-avatar" src="media/social/joelus-2.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
+          </span>
+          <span class="social-copy"><strong>Joelus2.0</strong><span>Reacciones fitness</span></span>
+        </a>
+        <a class="social-card" href="https://www.youtube.com/@JoelusFrikelus" target="_blank" rel="noopener noreferrer">
+          <span class="social-avatar-wrap" aria-hidden="true">
+            <img class="social-avatar" src="media/social/joelus-frikelus.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="youtube-mark"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></span>
+          </span>
+          <span class="social-copy"><strong>Joelus Frikelus</strong><span>Gameplays y ocio</span></span>
+        </a>
+      </nav>
+    </section>
+  </div>
+</footer>
 
 <!-- Socket.io -->
 <script src="/socket.io/socket.io.js"></script>
-<script src="/cliente.js?v=2.1"></script>
+<script src="/cliente.js?v=2.2"></script>
 </body>
 </html>

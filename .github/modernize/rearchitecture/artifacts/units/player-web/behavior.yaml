@@ -1,0 +1,37 @@
+unit: player-web
+side_effects:
+  - source_loc: "servidor/public/cliente.js:172"
+    effect: "A cell tap toggles the local marcadas Set and repaints the cell immediately before network delivery."
+    must_preserve: true
+  - source_loc: "servidor/public/cliente.js:78"
+    effect: "The client emits a full marked-cell snapshot after a local throttle window."
+    must_preserve: true
+  - source_loc: "servidor/public/cliente.js:318"
+    effect: "The Entrar action emits jugador:unirse with the user-entered display name and localStorage token."
+    must_preserve: true
+branches:
+  - source_loc: "servidor/public/cliente.js:421"
+    condition: "Socket.IO emits connect, including after a transport reconnection."
+    behavior: "Only log the socket ID; do not re-emit jugador:unirse or synchronize local marks."
+    must_preserve: false
+  - source_loc: "servidor/public/cliente.js:425"
+    condition: "Socket.IO emits disconnect."
+    behavior: "Clear pending prize timers and show a persistent message asking the player to reload."
+    must_preserve: false
+  - source_loc: "servidor/public/cliente.js:434"
+    condition: "Server emits tu:carton."
+    behavior: "Restore the cart and marks; the rules screen is bypassed only if the returned marked list is non-empty."
+    must_preserve: true
+error_paths:
+  - source_loc: "servidor/public/cliente.js:88"
+    trigger: "A mark is toggled while disconnected or the server silently rate-limits the emitted snapshot."
+    outcome: "The local UI stays marked; no server acknowledgement or retry reconciles the state."
+    contract: "No acknowledgement on jugador:actualizar-marcadas."
+    must_preserve: false
+  - source_loc: "servidor/public/cliente.js:425"
+    trigger: "Socket.IO loses its connection, for example during mobile network/background suspension."
+    outcome: "The UI asks for reload; automatic transport reconnect does not restore application membership."
+    contract: "Application-level rejoin is absent."
+    must_preserve: false
+concurrency:
+  model: async

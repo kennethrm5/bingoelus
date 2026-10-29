@@ -1,0 +1,15 @@
+unit: game-server
+commit: false
+candidate_splits:
+  - id: "servidor/server.js:750-1028"
+    drivers: [concern_split, lifecycle_split]
+    rationale: >
+      Express route handlers include Twitch OAuth queue/session management, static web delivery,
+      and health reporting alongside the real-time game server.
+    source_slice: {file: servidor/server.js, lines: [750, 1028]}
+  - id: "servidor/server.js:1042-1449"
+    drivers: [concern_split]
+    rationale: >
+      Manager authentication, game controls, player search, result persistence, and notifications
+      are grouped in one namespace handler separate from player events.
+    source_slice: {file: servidor/server.js, lines: [1042, 1449]}

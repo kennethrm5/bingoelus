@@ -1,0 +1,28 @@
+unit: desktop-gestor
+side_effects:
+  - source_loc: "main.js:11"
+    effect: "Starts a local Express server bound to 127.0.0.1:3001 to serve gestor.html and media."
+    must_preserve: true
+  - source_loc: "gestor.html:875"
+    effect: "Connects the desktop manager to remote /gestor with a saved server URL and handshake token."
+    must_preserve: true
+  - source_loc: "gestor.html:1652"
+    effect: "Mirrors server-provided player state and applies player-card mark deltas."
+    must_preserve: true
+branches:
+  - source_loc: "gestor.html:1561"
+    condition: "Socket.IO emits connect after initial connection or reconnection."
+    behavior: "Hides the connection overlay and logs success; server state synchronization is handled by estado:actual."
+    must_preserve: true
+  - source_loc: "gestor.html:1574"
+    condition: "Socket.IO emits connect_error."
+    behavior: "Displays the error and explicitly disconnects the current socket."
+    must_preserve: true
+error_paths:
+  - source_loc: "gestor.html:1579"
+    trigger: "Socket disconnect."
+    outcome: "Logs that the remote server disconnected."
+    contract: "No custom retry policy is configured in this source."
+    must_preserve: true
+concurrency:
+  model: async

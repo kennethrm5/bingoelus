@@ -1,0 +1,45 @@
+unit: game-server
+bindings:
+  - type: route-declaration
+    name: "Express HTTP routes, static assets, and /healthz"
+    source_loc: "servidor/server.js:750"
+    target: "expressApp"
+    must_appear_in_target: true
+    notes: "Includes Twitch OAuth routes, /api/casillas, /moderador, /jugador, health endpoint, and static assets."
+  - type: convention
+    name: "Socket.IO namespace /jugador"
+    source_loc: "servidor/server.js:1453"
+    target: "Player join, mark, and claim event handlers"
+    must_appear_in_target: true
+    notes: "Membership and online state are keyed by current socket.id."
+  - type: convention
+    name: "Socket.IO namespace /gestor"
+    source_loc: "servidor/server.js:1042"
+    target: "Manager controls and state/event broadcasts"
+    must_appear_in_target: true
+    notes: "Namespace middleware checks handshake auth.token."
+runtime_config:
+  - key: "PORT"
+    source_loc: "servidor/server.js:35"
+    source: env
+    default_value: "3000"
+    must_appear_in_target: true
+    notes: "HTTP and Socket.IO listener port."
+  - key: "SOCKET_IO_PING_INTERVAL_MS / SOCKET_IO_PING_TIMEOUT_MS"
+    source_loc: "servidor/server.js:42"
+    source: env
+    default_value: "25000 / 30000"
+    must_appear_in_target: true
+    notes: "Effective VM values are not present in the repository."
+  - key: "RATE_MARCADAS_BASE_MS / RATE_MARCADAS_MEDIA_MS / RATE_MARCADAS_ALTA_MS"
+    source_loc: "servidor/server.js:26"
+    source: env
+    default_value: "120 / 160 / 220"
+    must_appear_in_target: true
+    notes: "The selected interval depends on current online count."
+  - key: "GESTOR_TOKEN / TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET / BASE_URL"
+    source_loc: "servidor/server.js:11"
+    source: env
+    default_value: "Empty; config.json can override"
+    must_appear_in_target: true
+    notes: "Secret values intentionally not copied into architecture artifacts."
