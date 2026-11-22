@@ -40,6 +40,9 @@ const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
 const TWITCH_BANS_FILE = process.env.TWITCH_BANS_FILE
   ? path.resolve(process.env.TWITCH_BANS_FILE)
   : path.join(__dirname, 'datos', 'cuentas-baneadas.json');
+const RESULTS_DIR = process.env.RESULTS_DIR
+  ? path.resolve(process.env.RESULTS_DIR)
+  : path.join(__dirname, 'resultados');
 const TWITCH_LOGIN_PATTERN = /^[a-z0-9_]{1,25}$/;
 
 function cargarCuentasBaneadas() {
@@ -442,14 +445,54 @@ function resolverJugadorGestor(socketId) {
   return null;
 }
 
-function sincronizarGanadorEnTokens(resuelto, campo) {
-  const twitchLogin = resuelto.twitchLogin;
-  if (!twitchLogin || !estado.tokens[twitchLogin]) return;
-  if (resuelto.online) {
-    estado.tokens[twitchLogin][campo] = estado.jugadores[resuelto.socketId][campo];
-  } else if (resuelto.datosToken) {
-    estado.tokens[twitchLogin][campo] = resuelto.datosToken[campo];
+function marcarGanadorPersistente(twitchLogin, campo) {
+  if (!twitchLogin) return;
+  if (estado.tokens[twitchLogin]) {
+    estado.tokens[twitchLogin][campo] = true;
   }
+  for (const jugadorActivo of Object.values(estado.jugadores)) {
+    if (jugadorActivo.twitch === twitchLogin) {
+      jugadorActivo[campo] = true;
+    }
+  }
+}
+
+function formatearGanador(participante) {
+  const nombre = participante.nombre || participante.twitch || 'Sin nombre';
+  return participante.twitch ? `${nombre} (@${participante.twitch})` : nombre;
+}
+
+function recopilarParticipantesPartida() {
+  const participantes = new Map();
+
+  for (const [login, datos] of Object.entries(estado.tokens)) {
+    if (!datos) continue;
+    participantes.set(login, {
+      nombre: datos.nombre || login,
+      twitch: login,
+      cantadoLinea: !!datos.cantadoLinea,
+      cantadoBingo: !!datos.cantadoBingo,
+    });
+  }
+
+  for (const jugador of Object.values(estado.jugadores)) {
+    const clave = jugador.twitch || `socket:${jugador.socketId}`;
+    const existente = participantes.get(clave);
+    if (existente) {
+      existente.nombre = jugador.nombre || existente.nombre;
+      existente.cantadoLinea = existente.cantadoLinea || !!jugador.cantadoLinea;
+      existente.cantadoBingo = existente.cantadoBingo || !!jugador.cantadoBingo;
+    } else {
+      participantes.set(clave, {
+        nombre: jugador.nombre || jugador.twitch || 'Sin nombre',
+        twitch: jugador.twitch || '',
+        cantadoLinea: !!jugador.cantadoLinea,
+        cantadoBingo: !!jugador.cantadoBingo,
+      });
+    }
+  }
+
+  return [...participantes.values()];
 }
 
 function declararLineaManual(socketId) {
@@ -468,7 +511,7 @@ function declararLineaManual(socketId) {
     resuelto.datosToken.cantadoLinea = true;
     jugador.cantadoLinea = true;
   }
-  sincronizarGanadorEnTokens(resuelto, 'cantadoLinea');
+  marcarGanadorPersistente(resuelto.twitchLogin, 'cantadoLinea');
 
   estado.lineaGanada = true;
   estado.reclamacionesHabilitadas = false;
@@ -509,7 +552,7 @@ function declararBingoManual(socketId) {
     resuelto.datosToken.cantadoBingo = true;
     jugador.cantadoBingo = true;
   }
-  sincronizarGanadorEnTokens(resuelto, 'cantadoBingo');
+  marcarGanadorPersistente(resuelto.twitchLogin, 'cantadoBingo');
 
   estado.reclamacionesHabilitadas = false;
 
@@ -535,7 +578,7 @@ function declararBingoManual(socketId) {
 
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
 async function guardarResultados(ganadoresLinea, ganadoresBingo) {
-  const dir = path.join(__dirname, 'resultados');
+  const dir = RESULTS_DIR;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const ahora = new Date();
@@ -1541,12 +1584,15 @@ nsGestor.on('connection', (socket) => {
     estado.partidaActiva            = false;
     estado.reclamacionesHabilitadas = false;
 
-    const jugadores = Object.values(estado.jugadores);
-    const ganadoresLineaDiscord = jugadores.filter(j => j.cantadoLinea).map(j => `${j.nombre} (@${j.twitch})`);
-    const ganadoresBingoDiscord = jugadores.filter(j => j.cantadoBingo).map(j => `${j.nombre} (@${j.twitch})`);
+    const participantes = recopilarParticipantesPartida();
+    const totalOnline = new Set(
+      Object.values(estado.jugadores).map(j => j.twitch || `socket:${j.socketId}`)
+    ).size;
+    const ganadoresLineaDiscord = participantes.filter(j => j.cantadoLinea).map(formatearGanador);
+    const ganadoresBingoDiscord = participantes.filter(j => j.cantadoBingo).map(formatearGanador);
     const ganadoresLinea = ganadoresLineaDiscord.map(g => `  - ${g}`);
     const ganadoresBingo = ganadoresBingoDiscord.map(g => `  - ${g}`);
-    const ganadores = jugadores.filter(j => j.cantadoBingo).map(j => j.nombre);
+    const ganadores = participantes.filter(j => j.cantadoBingo).map(j => j.nombre);
 
     console.log(`[Servidor] Partida terminada. Ganadores de Bingo: ${ganadores.join(', ') || 'ninguno'}`);
     nsJugador.emit('partida:juego-terminado', { ganadores });
@@ -1558,8 +1604,8 @@ nsGestor.on('connection', (socket) => {
       await notificarDiscordFinPartida({
         ganadoresLinea: ganadoresLineaDiscord,
         ganadoresBingo: ganadoresBingoDiscord,
-        totalOnline: jugadores.length,
-        totalJugadores: Object.keys(estado.tokens).length,
+        totalOnline,
+        totalJugadores: participantes.length,
         totalCantadas: estado.cantadas.length,
         umbral: estado.umbralReclamo,
         archivoResultados,
@@ -1841,6 +1887,7 @@ function registrarFalloReclamo(jugador, socket) {
     
     jugador.huelgas = 0; // reset al acertar
     jugador.cantadoLinea = true;
+    marcarGanadorPersistente(jugador.twitch, 'cantadoLinea');
     estado.lineaGanada   = true;
     estado.reclamacionesHabilitadas = false;
     console.log(`[Servidor] 🎉 ${jugador.nombre} cantó LÍNEA correctamente.`);
@@ -1887,6 +1934,7 @@ function registrarFalloReclamo(jugador, socket) {
     
     jugador.huelgas = 0; // reset al acertar
     jugador.cantadoBingo = true;
+    marcarGanadorPersistente(jugador.twitch, 'cantadoBingo');
     estado.reclamacionesHabilitadas = false;
     console.log(`[Servidor] 🏆 ${jugador.nombre} cantó BINGO correctamente.`);
     const payload = { ganador: jugador.nombre, twitch: jugador.twitch, socketId: socket.id };
@@ -1919,8 +1967,8 @@ function registrarFalloReclamo(jugador, socket) {
       }
       if (estado.tokens[jugador.twitch]) {
         estado.tokens[jugador.twitch].marcadas     = jugador.marcadas;
-        estado.tokens[jugador.twitch].cantadoLinea = jugador.cantadoLinea;
-        estado.tokens[jugador.twitch].cantadoBingo = jugador.cantadoBingo;
+        estado.tokens[jugador.twitch].cantadoLinea = Boolean(estado.tokens[jugador.twitch].cantadoLinea || jugador.cantadoLinea);
+        estado.tokens[jugador.twitch].cantadoBingo = Boolean(estado.tokens[jugador.twitch].cantadoBingo || jugador.cantadoBingo);
       }
       if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
       gestorMarcadasPendientes.delete(socket.id);
