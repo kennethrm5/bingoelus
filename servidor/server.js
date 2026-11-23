@@ -172,6 +172,18 @@ function esCartonValido(carton) {
     carton.every(fila => Array.isArray(fila) && fila.length === CARTON_COLS && fila.every(f => typeof f === 'string'));
 }
 
+function cartonCoincideConFrases(carton, frases) {
+  if (!esCartonValido(carton) || !Array.isArray(frases) || frases.length < CARTON_SIZE) return false;
+  const frasesSet = new Set(frases);
+  return carton.every(fila => fila.every(frase => frasesSet.has(frase)));
+}
+
+function setNoStoreHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+
 function serializarEstadoPartida() {
   return {
     schemaVersion: GAME_STATE_SCHEMA_VERSION,
@@ -527,7 +539,8 @@ const DISCORD_MAX_FILE_BYTES = Math.max(256 * 1024, parseInt(process.env.DISCORD
 let gestorBroadcastTimer = null;
 function scheduledGestorBroadcast() {
   if (gestorBroadcastTimer) return;
-  const delay = Object.keys(estado.jugadores).length > 500 ? 2000 : 300;
+  const online = Object.keys(estado.jugadores).length;
+  const delay = online > 500 ? 2000 : (online > GESTOR_FULL_THRESHOLD ? 1200 : 300);
   gestorBroadcastTimer = setTimeout(() => {
     gestorBroadcastTimer = null;
     nsGestor.emit('partida:jugador-unido', resumenJugadores());
@@ -1510,6 +1523,7 @@ async function processAuthQueue() {
 
 // Endpoint donde la sala de espera consulta si ya entró
 expressApp.get('/auth/twitch/status', (req, res) => {
+  setNoStoreHeaders(res);
   const ticket = req.query.ticket;
   if (!ticket) return res.json({ status: 'error', error: 'estado_invalido' });
   
@@ -1538,12 +1552,14 @@ expressApp.get('/auth/twitch/status', (req, res) => {
 });
 
 expressApp.get('/auth/me', (req, res) => {
+  setNoStoreHeaders(res);
   const sid  = parseCookies(req.headers.cookie || '')['twitch_sid'];
   const data = obtenerSesionTwitch(sid);
   res.json(data || null);
 });
 
 expressApp.get('/auth/twitch/logout', (req, res) => {
+  setNoStoreHeaders(res);
   const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
   if (sid) revocarSesionTwitch(sid);
   const esHttps = Boolean(cfg.baseUrl && cfg.baseUrl.startsWith('https://')) ||
@@ -1554,14 +1570,24 @@ expressApp.get('/auth/twitch/logout', (req, res) => {
 });
 
   expressApp.get('/api/casillas', (req, res) => {
+    setNoStoreHeaders(res);
     res.sendFile(require('path').join(__dirname, 'casillas.json'), err => { if(err) res.status(404).json({}); });
   });
 
 expressApp.get(['/moderador', '/moderador.html'], (req, res) => {
+  setNoStoreHeaders(res);
   res.sendFile(path.join(__dirname, 'public', 'moderador.html'));
 });
 
 expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
+  setNoStoreHeaders(res);
+  if (cfg.clientId && !req.query.twitch_error) {
+    const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
+    if (!obtenerSesionTwitch(sid)) {
+      res.redirect('/auth/twitch');
+      return;
+    }
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -1624,6 +1650,7 @@ expressApp.get('/healthz', (_req, res) => {
 });
 
 expressApp.get('/', (req, res, next) => {
+  setNoStoreHeaders(res);
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
   const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
@@ -1636,6 +1663,11 @@ expressApp.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 0, // Desactivado para forzar recarga
   etag: true,
   lastModified: true,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      setNoStoreHeaders(res);
+    }
+  },
 }));
 expressApp.use('/media', express.static(path.join(__dirname, 'media'), {
   maxAge: '7d',   // las imágenes no cambian durante el directo
@@ -1679,14 +1711,14 @@ nsGestor.on('connection', (socket) => {
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
-    estado.partidaIniciadaTs        = Date.now();
+    estado.partidaIniciadaTs        = Math.max(Date.now(), (estado.partidaIniciadaTs || 0) + 1);
     estado.discordCartonesNotificados = {};
     limpiarColaMarcadasGestor();
     estado.reclamacionesHabilitadas = false;
     estado.umbralReclamo            = 0;
     programarGuardadoEstado('critical');
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
-    nsJugador.emit('partida:nueva');
+    nsJugador.emit('partida:nueva', { partidaId: estado.partidaIniciadaTs, partidaActiva: true });
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
   });
@@ -1832,7 +1864,7 @@ nsGestor.on('connection', (socket) => {
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
     limpiarColaMarcadasGestor();
     programarGuardadoEstado('critical');
-    nsJugador.emit('partida:nueva');
+    nsJugador.emit('partida:nueva', { partidaId: 0, partidaActiva: false });
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
     console.log('[Servidor] Partida reseteada por el gestor.');
@@ -2153,45 +2185,74 @@ nsJugador.on('connection', (socket) => {
   const twCookies = parseCookies(socket.handshake.headers.cookie || '');
   const twUser    = obtenerSesionTwitch(twCookies.twitch_sid);
 
+  socket.emit('servidor:estado-partida', {
+    partidaActiva: estado.partidaActiva,
+    partidaId: estado.partidaIniciadaTs || 0,
+    bingoGanado: estado.bingoGanado,
+  });
+
+  socket.on('jugador:ping-estado', (_payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const jugador = estado.jugadores[socket.id];
+    const sidActual = parseCookies(socket.handshake.headers.cookie || '')['twitch_sid'];
+    const sesionActual = obtenerSesionTwitch(sidActual);
+    ack({
+      ok: true,
+      registrado: Boolean(jugador),
+      sesionValida: Boolean(sesionActual) || ALLOW_STRESS_BOTS,
+      partidaActiva: estado.partidaActiva,
+      partidaId: estado.partidaIniciadaTs || 0,
+      cantadas: estado.cantadas,
+      lineaGanada: estado.lineaGanada,
+      bingoGanado: estado.bingoGanado,
+      reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
+      umbralReclamo: estado.umbralReclamo,
+      carton: jugador ? jugador.carton : null,
+      marcadas: jugador ? (jugador.marcadas || []) : [],
+    });
+  });
+
   socket.on('jugador:unirse', (payload) => {
     if (estado.jugadores[socket.id]) {
-      socket.emit('partida:error', { msg: 'Ya estás en la partida.' });
+      socket.emit('partida:error', { code: 'YA_UNIDO', msg: 'Ya estás en la partida.' });
       return;
     }
     const { nombre, token } = payload || {};
 
     if (!nombre || typeof nombre !== 'string' || nombre.trim().length === 0) {
-      socket.emit('partida:error', { msg: 'Nombre inválido.' });
+      socket.emit('partida:error', { code: 'NOMBRE_INVALIDO', msg: 'Nombre inválido.' });
       return;
     }
     if (!token || typeof token !== 'string' || token.length < 8 || token.length > 128) {
-      socket.emit('partida:error', { msg: 'Sesión inválida. Recarga la página.' });
+      socket.emit('partida:error', { code: 'TOKEN_INVALIDO', msg: 'Sesión inválida. Recarga la página.' });
       return;
     }
     if (!estado.partidaActiva) {
-      socket.emit('partida:error', { msg: 'No hay ninguna partida activa. Espera al gestor.' });
+      socket.emit('partida:error', { code: 'NO_PARTIDA', msg: 'No hay ninguna partida activa. Espera al gestor.' });
       return;
     }
     if (estado.bingoGanado) {
-      socket.emit('partida:error', { msg: 'La partida ya ha terminado.' });
+      socket.emit('partida:error', { code: 'PARTIDA_TERMINADA', msg: 'La partida ya ha terminado.' });
       return;
     }
-    if (!twUser) {
+    const sidActual = parseCookies(socket.handshake.headers.cookie || '')['twitch_sid'];
+    const twActual = obtenerSesionTwitch(sidActual) || null;
+    if (!twActual) {
       // Allow stress clients only when explicitly enabled via env var.
       if (ALLOW_STRESS_BOTS) {
         if (DEBUG_RECLAMOS) {
           console.log(`[Stress] Bot permitido sin Twitch sid en socket ${socket.id}`);
         }
       } else {
-        socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
+        socket.emit('partida:error', { code: 'SIN_TWITCH', msg: 'Debes iniciar sesión con Twitch para jugar.' });
         return;
       }
     }
 
     // Keep a stable synthetic login per bot token when stress bypass is enabled.
-    const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
+    const twitchLogin = twActual ? twActual.login : `stress_${token.slice(0, 16)}`;
     if (cuentasBaneadas.has(twitchLogin.toLowerCase())) {
-      socket.emit('partida:error', { msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
+      socket.emit('partida:error', { code: 'BANEADO', msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
       return;
     }
 
@@ -2208,11 +2269,15 @@ nsJugador.on('connection', (socket) => {
       j => j.nombre.toLowerCase() === nombreClean.toLowerCase() && j.twitch !== twitchLogin
     );
     if (nombreDuplicado) {
-      socket.emit('partida:error', { msg: `El nombre "${nombreClean}" ya está en uso. Elige otro.` });
+      socket.emit('partida:error', { code: 'NOMBRE_DUPLICADO', msg: `El nombre "${nombreClean}" ya está en uso. Elige otro.` });
       return;
     }
 
-    const datosGuardados = estado.tokens[twitchLogin];
+    const datosGuardadosPrevios = estado.tokens[twitchLogin];
+    const datosGuardados = (datosGuardadosPrevios && cartonCoincideConFrases(datosGuardadosPrevios.carton, estado.frases))
+      ? datosGuardadosPrevios
+      : null;
+
     let carton;
     if (datosGuardados) {
       carton = datosGuardados.carton;
@@ -2224,15 +2289,42 @@ nsJugador.on('connection', (socket) => {
         cantadoLinea: false,
         cantadoBingo: false,
         nombre: nombreClean,
-        twitchVerified: !!twUser,
+        twitchVerified: !!twActual,
       };
     }
     estado.tokens[twitchLogin].nombre = nombreClean;
-    estado.tokens[twitchLogin].twitchVerified = !!twUser;
+    estado.tokens[twitchLogin].twitchVerified = !!twActual;
+
+    for (const [oldSid, oldJ] of Object.entries(estado.jugadores)) {
+      if (oldSid === socket.id || oldJ.twitch !== twitchLogin) continue;
+      const pendiente = marcadasPendientesRate.get(oldSid);
+      if (pendiente) {
+        clearTimeout(pendiente.timer);
+        marcadasPendientesRate.delete(oldSid);
+        if (datosGuardados && cartonCoincideConFrases(oldJ.carton, estado.frases)) {
+          aplicarSnapshotMarcadas(oldJ, pendiente.marcadas);
+        }
+      }
+      if (datosGuardados && estado.tokens[twitchLogin] && cartonCoincideConFrases(oldJ.carton, estado.frases)) {
+        estado.tokens[twitchLogin].marcadas = oldJ.marcadas || estado.tokens[twitchLogin].marcadas || [];
+        estado.tokens[twitchLogin].cantadoLinea = Boolean(estado.tokens[twitchLogin].cantadoLinea || oldJ.cantadoLinea);
+        estado.tokens[twitchLogin].cantadoBingo = Boolean(estado.tokens[twitchLogin].cantadoBingo || oldJ.cantadoBingo);
+      }
+      if (oldJ.ip && estado.ips[oldJ.ip] === twitchLogin) delete estado.ips[oldJ.ip];
+      gestorMarcadasPendientes.delete(oldSid);
+      delete estado.jugadores[oldSid];
+      delete rateLimits[oldSid];
+      const oldSock = nsJugador.sockets.get(oldSid);
+      if (oldSock) {
+        oldSock.data = { ...(oldSock.data || {}), reemplazado: true };
+        oldSock.disconnect(true);
+      }
+    }
+
     programarGuardadoEstado('batch');
-    const marcadasGuardadas = (datosGuardados && datosGuardados.marcadas)     || [];
-    const cantadoLineaGuard = (datosGuardados && datosGuardados.cantadoLinea) || false;
-    const cantadoBingoGuard = (datosGuardados && datosGuardados.cantadoBingo) || false;
+    const marcadasGuardadas = [...((estado.tokens[twitchLogin] && estado.tokens[twitchLogin].marcadas) || [])];
+    const cantadoLineaGuard = Boolean(estado.tokens[twitchLogin] && estado.tokens[twitchLogin].cantadoLinea);
+    const cantadoBingoGuard = Boolean(estado.tokens[twitchLogin] && estado.tokens[twitchLogin].cantadoBingo);
 
     estado.ips[ip] = twitchLogin;
 
@@ -2242,7 +2334,7 @@ nsJugador.on('connection', (socket) => {
       ip,
       nombre:         nombreClean,
       twitch:         twitchLogin,
-      twitchVerified: !!twUser,
+      twitchVerified: !!twActual,
       carton,
       cantadoLinea:   cantadoLineaGuard,
       cantadoBingo:   cantadoBingoGuard,
@@ -2252,6 +2344,7 @@ nsJugador.on('connection', (socket) => {
     console.log(`[Servidor] ${jugador.nombre} (@${twitchLogin}) se unió desde ${ip}.`);
 
     socket.emit('tu:carton', {
+      partidaId:                estado.partidaIniciadaTs || 0,
       carton,
       cantadas:                 estado.cantadas,
       marcadas:                 marcadasGuardadas,
@@ -2260,7 +2353,11 @@ nsJugador.on('connection', (socket) => {
       reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
       umbralReclamo:            estado.umbralReclamo,
     });
-    nsGestor.emit('partida:jugador-unido', resumenJugadores());
+    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+      scheduledGestorBroadcast();
+    } else {
+      nsGestor.emit('partida:jugador-unido', resumenJugadores());
+    }
   });
 
   socket.on('jugador:actualizar-marcadas', ({ marcadas } = {}) => {
@@ -2430,15 +2527,25 @@ function registrarFalloReclamo(jugador, socket) {
       if (marcasPendientes) {
         clearTimeout(marcasPendientes.timer);
         marcadasPendientesRate.delete(socket.id);
-        aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+        if (!socket.data?.reemplazado && cartonCoincideConFrases(jugador.carton, estado.frases)) {
+          aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+        }
       }
-      if (estado.tokens[jugador.twitch]) {
-        estado.tokens[jugador.twitch].marcadas     = jugador.marcadas;
+      const hayOtroSocketActivo = Object.entries(estado.jugadores).some(
+        ([sid, otro]) => sid !== socket.id && otro.twitch === jugador.twitch
+      );
+      if (!socket.data?.reemplazado && !hayOtroSocketActivo && estado.tokens[jugador.twitch]) {
+        if (cartonCoincideConFrases(jugador.carton, estado.frases) &&
+            cartonCoincideConFrases(estado.tokens[jugador.twitch].carton, estado.frases)) {
+          estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
+        }
         estado.tokens[jugador.twitch].cantadoLinea = Boolean(estado.tokens[jugador.twitch].cantadoLinea || jugador.cantadoLinea);
         estado.tokens[jugador.twitch].cantadoBingo = Boolean(estado.tokens[jugador.twitch].cantadoBingo || jugador.cantadoBingo);
         programarGuardadoEstado('batch');
       }
-      if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
+      if (!hayOtroSocketActivo && jugador.ip && estado.ips[jugador.ip] === jugador.twitch) {
+        delete estado.ips[jugador.ip];
+      }
       gestorMarcadasPendientes.delete(socket.id);
       delete estado.jugadores[socket.id];
       delete rateLimits[socket.id];

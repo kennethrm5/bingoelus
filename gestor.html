@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <link rel="icon" type="image/png" href="/media/bingoelus.png" />
   <title>Bingoelus — Gestor</title>
   <style>
@@ -10,6 +11,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      color-scheme: dark;
       --bg:        #090909;
       --surface:   #151515;
       --surface2:  #202020;
@@ -1900,13 +1902,14 @@
   let refrescoRankingTimer = null;
   let busquedaReqSeq = 0;
   let busquedaReqPendiente = 0;
+  let ultimoConteoOnlineLog = null;
 
   function programarRefrescoRanking() {
     if (refrescoRankingTimer) return;
     refrescoRankingTimer = setTimeout(() => {
       refrescoRankingTimer = null;
       renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
-    }, 450);
+    }, 600);
   }
 
   function obtenerJugadoresParaRender() {
@@ -2316,6 +2319,223 @@
   }
 
   // ── Renderizar lista de jugadores (acordeón) ──────────
+  function crearFirmaMetaJugador(j) {
+    return JSON.stringify([
+      j.nombre || '',
+      j.twitch || '',
+      !!j.twitchVerified,
+      !!j.cantadoLinea,
+      !!j.cantadoBingo,
+      j.online !== false,
+    ]);
+  }
+
+  function crearFirmaCartonJugador(j, cantadasSet) {
+    const marcadasSet = new Set(j.marcadas || []);
+    const filas = Array.isArray(j.carton) ? j.carton : [];
+    const estadoCeldas = [];
+    for (let fi = 0; fi < filas.length; fi++) {
+      const row = Array.isArray(filas[fi]) ? filas[fi] : [];
+      for (let ci = 0; ci < row.length; ci++) {
+        const frase = row[ci];
+        estadoCeldas.push([frase, cantadasSet.has(frase) ? 1 : 0, marcadasSet.has(frase) ? 1 : 0]);
+      }
+    }
+    return JSON.stringify(estadoCeldas);
+  }
+
+  function crearFirmaAccionesJugador(j) {
+    return JSON.stringify([
+      j.socketId || '',
+      j.nombre || '',
+      !!j.cantadoLinea,
+      !!j.cantadoBingo,
+      !!estadoLocal.partidaActiva,
+    ]);
+  }
+
+  function crearFilaJugador(j) {
+    const fila = document.createElement('div');
+    fila.className = 'jugador-fila';
+    fila.dataset.id = j.socketId;
+    fila._jugador = j;
+
+    const cabecera = document.createElement('div');
+    cabecera.className = 'jugador-cabecera';
+
+    const nombreEl = document.createElement('div');
+    nombreEl.className = 'jugador-nombre';
+
+    const avatar = document.createElement('span');
+    avatar.className = 'jugador-avatar';
+
+    const textoNombre = document.createElement('span');
+
+    const chevron = document.createElement('span');
+    chevron.className = 'jugador-chevron';
+    chevron.textContent = '▼';
+
+    cabecera.appendChild(nombreEl);
+    cabecera.appendChild(chevron);
+
+    cabecera.addEventListener('click', () => {
+      const estaAbierto = fila.classList.contains('abierto');
+      listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
+      if (estaAbierto) {
+        jugadorAbierto = null;
+      } else {
+        fila.classList.add('abierto');
+        jugadorAbierto = fila._jugador ? fila._jugador.socketId : fila.dataset.id;
+      }
+    });
+
+    const panelCarton = document.createElement('div');
+    panelCarton.className = 'jugador-carton';
+
+    const inner = document.createElement('div');
+    inner.className = 'jugador-carton-inner';
+
+    const grid = document.createElement('div');
+    grid.className = 'carton-grid';
+
+    const acciones = document.createElement('div');
+    acciones.className = 'jugador-acciones';
+
+    inner.appendChild(grid);
+    panelCarton.appendChild(inner);
+    fila.appendChild(cabecera);
+    fila.appendChild(panelCarton);
+
+    fila._refs = { nombreEl, avatar, textoNombre, inner, grid, acciones };
+    fila._metaSig = '';
+    fila._cartonSig = '';
+    fila._cartonPhrasesSig = '';
+    fila._accionesSig = '';
+    return fila;
+  }
+
+  function actualizarFilaJugador(fila, j, cantadasSet, estaAbierto) {
+    fila._jugador = j;
+    fila.dataset.id = j.socketId;
+
+    const claseEsperada = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '') + (estaAbierto ? ' abierto' : '');
+    if (fila.className !== claseEsperada) fila.className = claseEsperada;
+
+    const refs = fila._refs;
+    const metaSig = crearFirmaMetaJugador(j);
+    if (fila._metaSig !== metaSig) {
+      fila._metaSig = metaSig;
+      refs.avatar.textContent = (j.nombre || '?').charAt(0).toUpperCase();
+      refs.textoNombre.textContent = j.nombre || '';
+
+      const nodosHeader = [refs.avatar, refs.textoNombre];
+      if (j.twitch) {
+        const twitchEl = document.createElement('span');
+        twitchEl.className = 'twitch-tag';
+        twitchEl.textContent = `@${j.twitch}`;
+        if (j.twitchVerified) {
+          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
+          twitchEl.textContent += ' ✓';
+          twitchEl.classList.add('twitch-verified');
+        }
+        nodosHeader.push(twitchEl);
+      }
+      if (j.cantadoLinea) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-linea';
+        b.textContent = 'LÍNEA';
+        nodosHeader.push(b);
+      }
+      if (j.cantadoBingo) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-bingo';
+        b.textContent = 'BINGO';
+        nodosHeader.push(b);
+      }
+      if (j.online === false) {
+        const b = document.createElement('span');
+        b.className = 'badge-offline';
+        b.textContent = 'desconectado';
+        nodosHeader.push(b);
+      }
+      refs.nombreEl.replaceChildren(...nodosHeader);
+    }
+
+    const cartonSig = crearFirmaCartonJugador(j, cantadasSet);
+    if (fila._cartonSig !== cartonSig) {
+      fila._cartonSig = cartonSig;
+      const frasesPlanas = Array.isArray(j.carton) ? j.carton.flat() : [];
+      const phrasesSig = JSON.stringify(frasesPlanas);
+      const marcadasSet = new Set(j.marcadas || []);
+
+      if (fila._cartonPhrasesSig !== phrasesSig || refs.grid.children.length !== frasesPlanas.length) {
+        fila._cartonPhrasesSig = phrasesSig;
+        const nuevasCeldas = frasesPlanas.map(frase => {
+          const celda = document.createElement('div');
+          const span = document.createElement('span');
+          span.textContent = frase;
+          celda.appendChild(span);
+          return celda;
+        });
+        refs.grid.replaceChildren(...nuevasCeldas);
+      }
+
+      const celdas = refs.grid.children;
+      for (let i = 0; i < frasesPlanas.length; i++) {
+        const frase = frasesPlanas[i];
+        const celda = celdas[i];
+        const esCantada = cantadasSet.has(frase);
+        const esMarcada = marcadasSet.has(frase);
+        const claseCelda = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
+        if (celda.className !== claseCelda) celda.className = claseCelda;
+        celda.title = esMarcada
+          ? esCantada ? `Marcada por el jugador y cantada: ${frase}` : `Marcada por el jugador, pero aún no cantada: ${frase}`
+          : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : frase;
+      }
+    }
+
+    const accionesSig = crearFirmaAccionesJugador(j);
+    if (fila._accionesSig !== accionesSig) {
+      fila._accionesSig = accionesSig;
+      if (estadoLocal.partidaActiva && (!j.cantadoLinea || !j.cantadoBingo)) {
+        const botones = [];
+        if (!j.cantadoLinea) {
+          const btnLinea = document.createElement('button');
+          btnLinea.type = 'button';
+          btnLinea.className = 'btn-declarar-ganador linea';
+          btnLinea.textContent = 'Declarar línea';
+          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
+          btnLinea.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const actual = fila._jugador || j;
+            if (!confirm(`¿Declarar LÍNEA para ${actual.nombre}?`)) return;
+            emitirAlServidor('gestor:declarar-linea', { socketId: actual.socketId });
+          });
+          botones.push(btnLinea);
+        }
+        if (!j.cantadoBingo) {
+          const btnBingo = document.createElement('button');
+          btnBingo.type = 'button';
+          btnBingo.className = 'btn-declarar-ganador bingo';
+          btnBingo.textContent = 'Declarar bingo';
+          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
+          btnBingo.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const actual = fila._jugador || j;
+            if (!confirm(`¿Declarar BINGO para ${actual.nombre}?`)) return;
+            emitirAlServidor('gestor:declarar-bingo', { socketId: actual.socketId });
+          });
+          botones.push(btnBingo);
+        }
+        refs.acciones.replaceChildren(...botones);
+        if (refs.acciones.parentNode !== refs.inner) refs.inner.appendChild(refs.acciones);
+      } else {
+        refs.acciones.replaceChildren();
+        if (refs.acciones.parentNode === refs.inner) refs.inner.removeChild(refs.acciones);
+      }
+    }
+  }
+
   function renderizarCartones(jugadores, cantadas) {
     const termBusqueda = (document.getElementById('buscador-jugadores')?.value || '').trim();
     const cantadasSet = new Set(cantadas);
@@ -2337,11 +2557,9 @@
       return;
     }
 
-    // Guardar el ID abierto antes de reconstruir
     const anteriorAbierto = jugadorAbierto;
-    listaJugadores.innerHTML = '';
 
-    // Ordenar jugadores por casillas faltantes para el bingo (menos faltantes primero)
+    // Ordenar jugadores por casillas faltantes para el bingo y desempate determinista
     const jugadoresOrdenados = [...jugadores].sort((a, b) => {
       const marcadasA = new Set(a.marcadas || []);
       const marcadasB = new Set(b.marcadas || []);
@@ -2353,155 +2571,47 @@
       const faltantesB = cartonB.length > 0
         ? cartonB.filter(f => !(cantadasSet.has(f) && marcadasB.has(f))).length
         : Number.MAX_SAFE_INTEGER;
-      return faltantesA - faltantesB;
+      if (faltantesA !== faltantesB) return faltantesA - faltantesB;
+      const cmpNombre = (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' });
+      if (cmpNombre !== 0) return cmpNombre;
+      return String(a.socketId || '').localeCompare(String(b.socketId || ''));
     });
 
+    const filasPorId = new Map();
+    Array.from(listaJugadores.children).forEach(nodo => {
+      if (nodo.classList && nodo.classList.contains('jugador-fila') && nodo.dataset && nodo.dataset.id) {
+        filasPorId.set(nodo.dataset.id, nodo);
+      } else if (typeof nodo.remove === 'function') {
+        nodo.remove();
+      } else if (nodo.parentNode) {
+        nodo.parentNode.removeChild(nodo);
+      }
+    });
+
+    const idsActivos = new Set();
+    const filasOrdenadas = [];
     jugadoresOrdenados.forEach(j => {
-      const fila = document.createElement('div');
-      fila.className  = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '');
-      fila.dataset.id = j.socketId;
-      if (j.socketId === anteriorAbierto) fila.classList.add('abierto');
-
-      // ── Cabecera clicable ──────────────────────────────
-      const cabecera = document.createElement('div');
-      cabecera.className = 'jugador-cabecera';
-
-      const nombreEl = document.createElement('div');
-      nombreEl.className = 'jugador-nombre';
-
-      // Avatar inicial
-      const avatar = document.createElement('span');
-      avatar.className = 'jugador-avatar';
-      avatar.textContent = j.nombre.charAt(0).toUpperCase();
-      nombreEl.appendChild(avatar);
-
-      const textoNombre = document.createElement('span');
-      textoNombre.textContent = j.nombre;
-      nombreEl.appendChild(textoNombre);
-
-      // Twitch username (optional)
-      if (j.twitch) {
-        const twitchEl = document.createElement('span');
-        twitchEl.className   = 'twitch-tag';
-        twitchEl.textContent = `@${j.twitch}`;
-        if (j.twitchVerified) {
-          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
-          twitchEl.textContent += ' ✓';
-          twitchEl.classList.add('twitch-verified');
-        }
-        nombreEl.appendChild(twitchEl);
+      idsActivos.add(j.socketId);
+      let fila = filasPorId.get(j.socketId);
+      if (!fila) {
+        fila = crearFilaJugador(j);
       }
+      actualizarFilaJugador(fila, j, cantadasSet, j.socketId === anteriorAbierto);
+      filasOrdenadas.push(fila);
+    });
 
-      if (j.cantadoLinea) {
-        const b = document.createElement('span');
-        b.className = 'badge badge-linea';
-        b.textContent = 'LÍNEA';
-        nombreEl.appendChild(b);
+    filasPorId.forEach((fila, sid) => {
+      if (!idsActivos.has(sid)) {
+        if (typeof fila.remove === 'function') fila.remove();
+        else if (fila.parentNode) fila.parentNode.removeChild(fila);
       }
-      if (j.cantadoBingo) {
-        const b = document.createElement('span');
-        b.className = 'badge badge-bingo';
-        b.textContent = 'BINGO';
-        nombreEl.appendChild(b);
+    });
+
+    filasOrdenadas.forEach((fila, idx) => {
+      const actualEnPos = listaJugadores.children[idx];
+      if (actualEnPos !== fila) {
+        listaJugadores.insertBefore(fila, actualEnPos || null);
       }
-      if (j.online === false) {
-        const b = document.createElement('span');
-        b.className = 'badge-offline';
-        b.textContent = 'desconectado';
-        nombreEl.appendChild(b);
-      }
-
-      const chevron = document.createElement('span');
-      chevron.className   = 'jugador-chevron';
-      chevron.textContent = '▼';
-
-      cabecera.appendChild(nombreEl);
-      cabecera.appendChild(chevron);
-
-      // Toggle acordeón al hacer clic en la cabecera
-      cabecera.addEventListener('click', () => {
-        const estaAbierto = fila.classList.contains('abierto');
-        // Cerrar todos
-        listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
-        if (estaAbierto) {
-          jugadorAbierto = null; // Era el mismo → cerrar
-        } else {
-          fila.classList.add('abierto');
-          jugadorAbierto = j.socketId;
-        }
-      });
-
-      // ── Panel del cartón (collapsable) ────────────────
-      const panelCarton = document.createElement('div');
-      panelCarton.className = 'jugador-carton';
-
-      const inner = document.createElement('div');
-      inner.className = 'jugador-carton-inner';
-
-      const grid = document.createElement('div');
-      grid.className = 'carton-grid';
-      const marcadasSet = new Set(j.marcadas || []);
-      j.carton.forEach(fila2 => {
-        fila2.forEach(frase => {
-          const celda = document.createElement('div');
-          const esCantada  = cantadasSet.has(frase);
-          const esMarcada  = marcadasSet.has(frase);
-          let clasesCelda  = 'celda';
-          if (esCantada)  clasesCelda += ' cantada';
-          if (esMarcada)  clasesCelda += ' marcada-jugador';
-          celda.className   = clasesCelda;
-          const span = document.createElement('span');
-          span.textContent = frase;
-          celda.appendChild(span);
-          celda.title = esMarcada
-            ? esCantada ? `Marcada por el jugador y cantada: ${frase}` : `Marcada por el jugador, pero aún no cantada: ${frase}`
-            : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : frase;
-          grid.appendChild(celda);
-        });
-      });
-
-      inner.appendChild(grid);
-
-      if (estadoLocal.partidaActiva) {
-        const acciones = document.createElement('div');
-        acciones.className = 'jugador-acciones';
-
-        if (!j.cantadoLinea) {
-          const btnLinea = document.createElement('button');
-          btnLinea.type = 'button';
-          btnLinea.className = 'btn-declarar-ganador linea';
-          btnLinea.textContent = 'Declarar línea';
-          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
-          btnLinea.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar LÍNEA para ${j.nombre}?`)) return;
-            emitirAlServidor('gestor:declarar-linea', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnLinea);
-        }
-
-        if (!j.cantadoBingo) {
-          const btnBingo = document.createElement('button');
-          btnBingo.type = 'button';
-          btnBingo.className = 'btn-declarar-ganador bingo';
-          btnBingo.textContent = 'Declarar bingo';
-          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
-          btnBingo.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar BINGO para ${j.nombre}?`)) return;
-            emitirAlServidor('gestor:declarar-bingo', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnBingo);
-        }
-
-        if (acciones.childElementCount > 0) inner.appendChild(acciones);
-      }
-
-      panelCarton.appendChild(inner);
-
-      fila.appendChild(cabecera);
-      fila.appendChild(panelCarton);
-      listaJugadores.appendChild(fila);
     });
 
     aplicarFiltroJugadores(true); // Reaplicar el buscador local (sin relanzar búsqueda remota)
@@ -2678,6 +2788,7 @@
 
     // Estado completo (al conectar o tras reset)
     socket.on('estado:actual', (data) => {
+      ultimoConteoOnlineLog = null;
       aplicarEstado(data);
 
       // Si el buscador está activo en modo compacto, reconsultar para mantener resultados coherentes.
@@ -2725,7 +2836,10 @@
       else renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
     }
     const n = Number.isFinite(estadoLocal.online) ? estadoLocal.online : estadoLocal.jugadores.length;
-    agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+    if (n !== ultimoConteoOnlineLog) {
+      ultimoConteoOnlineLog = n;
+      agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+    }
   });
 
   socket.on('partida:resultado-busqueda-jugadores', ({ q, jugadores, requestId }) => {
@@ -2754,6 +2868,7 @@
     if (jugBusqueda) jugBusqueda.marcadas = marcadas;
     const fila = listaJugadores.querySelector(`[data-id="${socketId}"]`);
     if (fila) {
+      fila._cartonSig = '';
       const marcadasSet = new Set(marcadas);
       const cantadasSet = new Set(estadoLocal.cantadas);
       fila.querySelectorAll('.celda').forEach(celda => {
