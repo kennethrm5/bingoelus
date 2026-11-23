@@ -32,6 +32,8 @@ function leerGestorToken() {
 const activeSockets = new Set();
 const activeServers = new Set();
 const tempDirs = new Set();
+const activeVmIntervals = new Set();
+const activeVmTimeouts = new Set();
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -378,6 +380,10 @@ function createFakeSocket() {
 }
 
 afterEach(async () => {
+  for (const iv of activeVmIntervals) clearInterval(iv);
+  activeVmIntervals.clear();
+  for (const to of activeVmTimeouts) clearTimeout(to);
+  activeVmTimeouts.clear();
   for (const sock of activeSockets) sock.disconnect();
   activeSockets.clear();
   for (const proc of [...activeServers]) await stopServer(proc);
@@ -428,7 +434,7 @@ test('HTTP routes return Cache-Control: no-store and /jugador redirects unauthen
   }
 
   const indexHtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-  assert.match(indexHtml, /\/cliente\.js\?v=2\.4/);
+  assert.match(indexHtml, /\/cliente\.js\?v=2\.5/);
 });
 
 test('server validates cards against active phrases, increases partidaId, handles ping-estado and protects against zombie disconnects', async () => {
@@ -643,10 +649,27 @@ async function runClientVmScenario({
       return { ok: false, status: 404, json: async () => null };
     },
     io: () => mockSocket,
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval,
+    setTimeout: (fn, ms, ...args) => {
+      const id = setTimeout(() => {
+        activeVmTimeouts.delete(id);
+        fn(...args);
+      }, ms);
+      activeVmTimeouts.add(id);
+      return id;
+    },
+    clearTimeout: (id) => {
+      activeVmTimeouts.delete(id);
+      clearTimeout(id);
+    },
+    setInterval: (fn, ms, ...args) => {
+      const id = setInterval(fn, ms, ...args);
+      activeVmIntervals.add(id);
+      return id;
+    },
+    clearInterval: (id) => {
+      activeVmIntervals.delete(id);
+      clearInterval(id);
+    },
     console,
     Date,
     Set,

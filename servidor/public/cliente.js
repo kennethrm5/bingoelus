@@ -34,7 +34,8 @@ function cargarSesionJugador() {
       : [];
     const partidaId = Number.isFinite(sesion.partidaId) && sesion.partidaId > 0 ? sesion.partidaId : 0;
     const twitch = typeof sesion.twitch === 'string' ? sesion.twitch.trim().toLowerCase() : '';
-    return { nombre: sesion.nombre.trim(), carton: sesion.carton, marcadas, partidaId, twitch };
+    const reglasAceptadas = sesion.reglasAceptadas !== false;
+    return { nombre: sesion.nombre.trim(), carton: sesion.carton, marcadas, partidaId, twitch, reglasAceptadas };
   } catch (error) {
     console.warn('[Cliente] No se pudo recuperar la sesión local del jugador:', error);
     return null;
@@ -59,8 +60,9 @@ const estado = {
   marcadas: new Set(sesionJugadorGuardada ? sesionJugadorGuardada.marcadas : []),  // las que el jugador ha tachado
   recibimoLinea: false,
   recibimoBingo: false,
-  enPartida: !!sesionJugadorGuardada,
+  enPartida: Boolean(sesionJugadorGuardada && sesionJugadorGuardada.reglasAceptadas),
   partidaId: sesionJugadorGuardada ? (sesionJugadorGuardada.partidaId || 0) : 0,
+  reglasAceptadas: sesionJugadorGuardada ? Boolean(sesionJugadorGuardada.reglasAceptadas) : false,
 };
 
 // Si el gestor ha habilitado las reclamaciones
@@ -82,20 +84,27 @@ let reclamoBingoTimer = null;
 const RECLAMO_ACK_TIMEOUT_MS = 2500;
 
 // referencias DOM
-const pantallaLogin  = document.getElementById('pantalla-login');
-const pantallaReglas = document.getElementById('pantalla-reglas');
-const pantallaJuego  = document.getElementById('pantalla-juego');
-const btnEntrar      = document.getElementById('btn-entrar');
-const msgEspera      = document.getElementById('msg-espera');
-const nombreDisplay  = document.getElementById('nombre-display');
-const estadoPartida  = document.getElementById('estado-partida');
-const txtUltimaFrase = null; // elemento eliminado
-const cartonEl       = document.getElementById('carton');
-const btnLinea       = document.getElementById('btn-linea');
-const btnBingo       = document.getElementById('btn-bingo');
-const accionesEl     = document.getElementById('acciones');
-const notificacionEl = document.getElementById('notificacion');
-const bannerAnuncio  = document.getElementById('banner-anuncio');
+const pantallaLogin      = document.getElementById('pantalla-login');
+const pantallaReglas     = document.getElementById('pantalla-reglas');
+const pantallaJuego      = document.getElementById('pantalla-juego');
+const btnEntrar          = document.getElementById('btn-entrar');
+const msgEspera          = document.getElementById('msg-espera');
+const nombreDisplay      = document.getElementById('nombre-display');
+const estadoPartida      = document.getElementById('estado-partida');
+const txtUltimaFrase     = null; // elemento eliminado
+const cartonEl           = document.getElementById('carton');
+const btnLinea           = document.getElementById('btn-linea');
+const btnBingo           = document.getElementById('btn-bingo');
+const accionesEl         = document.getElementById('acciones');
+const notificacionEl     = document.getElementById('notificacion');
+const bannerAnuncio      = document.getElementById('banner-anuncio');
+const btnAceptarReglas   = document.getElementById('btn-aceptar-reglas');
+const reglasScrollEl     = document.getElementById('reglas-scroll');
+const chkAceptarReglas   = document.getElementById('chk-aceptar-reglas');
+const reglasAceptacionEl = document.getElementById('reglas-aceptacion');
+const reqReglasTiempoEl  = document.getElementById('req-reglas-tiempo');
+const reqReglasScrollEl  = document.getElementById('req-reglas-scroll');
+const reqReglasCheckEl   = document.getElementById('req-reglas-check');
 
 // utilidades de UI
 
@@ -151,6 +160,7 @@ function guardarSesionJugador() {
       marcadas: Array.from(estado.marcadas),
       partidaId: Number.isFinite(estado.partidaId) && estado.partidaId > 0 ? estado.partidaId : 0,
       twitch: twitchGuardado,
+      reglasAceptadas: Boolean(estado.reglasAceptadas),
     }));
   } catch (error) {
     console.warn('[Cliente] No se pudo guardar la sesión local del jugador:', error);
@@ -219,6 +229,125 @@ function mostrarBanner(msg, tipo) {
   bannerAnuncio.textContent   = msg;
 }
 
+const REGLAS_MIN_SEGUNDOS = 10;
+const REGLAS_SCROLL_TOLERANCIA_PX = 12;
+let reglasSegundosRestantes = REGLAS_MIN_SEGUNDOS;
+let reglasScrollCompletado = false;
+let reglasTimerIv = null;
+
+function detenerTemporizadorReglas() {
+  clearInterval(reglasTimerIv);
+  reglasTimerIv = null;
+}
+
+function puedeAceptarReglas() {
+  return reglasSegundosRestantes <= 0 &&
+    reglasScrollCompletado &&
+    Boolean(chkAceptarReglas && chkAceptarReglas.checked);
+}
+
+function verificarScrollReglas() {
+  if (!pantallaReglas || pantallaReglas.style.display === 'none') return false;
+  if (!reglasScrollEl) {
+    reglasScrollCompletado = true;
+    return true;
+  }
+  const scrollHeight = Number(reglasScrollEl.scrollHeight) || 0;
+  const clientHeight = Number(reglasScrollEl.clientHeight) || 0;
+  const scrollTop = Number(reglasScrollEl.scrollTop) || 0;
+  if ((scrollHeight <= 0 && clientHeight <= 0) ||
+      scrollHeight <= clientHeight + REGLAS_SCROLL_TOLERANCIA_PX ||
+      (scrollTop + clientHeight) >= (scrollHeight - REGLAS_SCROLL_TOLERANCIA_PX)) {
+    reglasScrollCompletado = true;
+  }
+  return reglasScrollCompletado;
+}
+
+function actualizarEstadoPuertaReglas() {
+  const tiempoOk = reglasSegundosRestantes <= 0;
+  const scrollOk = reglasScrollCompletado;
+  const checkOk = Boolean(chkAceptarReglas && chkAceptarReglas.checked);
+  const listo = tiempoOk && scrollOk && checkOk;
+
+  if (reqReglasTiempoEl) {
+    reqReglasTiempoEl.classList.toggle('completado', tiempoOk);
+    reqReglasTiempoEl.textContent = tiempoOk
+      ? 'Lectura mínima completada'
+      : `Espera ${reglasSegundosRestantes} s leyendo`;
+  }
+  if (reqReglasScrollEl) {
+    reqReglasScrollEl.classList.toggle('completado', scrollOk);
+    reqReglasScrollEl.textContent = scrollOk
+      ? 'Reglas leídas hasta el final'
+      : 'Desliza hasta el final';
+  }
+  if (reqReglasCheckEl) {
+    reqReglasCheckEl.classList.toggle('completado', checkOk);
+    reqReglasCheckEl.textContent = checkOk
+      ? 'Casilla confirmada'
+      : 'Marca la casilla';
+  }
+  if (reglasAceptacionEl) {
+    reglasAceptacionEl.classList.toggle('aceptado', checkOk);
+  }
+  if (btnAceptarReglas) {
+    btnAceptarReglas.disabled = !listo;
+    if (typeof btnAceptarReglas.setAttribute === 'function') {
+      btnAceptarReglas.setAttribute('aria-disabled', listo ? 'false' : 'true');
+    }
+    if (!tiempoOk) {
+      btnAceptarReglas.textContent = `Lee las reglas (${reglasSegundosRestantes}s)`;
+    } else if (!scrollOk) {
+      btnAceptarReglas.textContent = 'Desliza hasta el final de las reglas';
+    } else if (!checkOk) {
+      btnAceptarReglas.textContent = 'Marca la casilla para continuar';
+    } else {
+      btnAceptarReglas.textContent = 'Entendido, a jugar';
+    }
+  }
+}
+
+function iniciarTemporizadorReglas() {
+  detenerTemporizadorReglas();
+  if (reglasSegundosRestantes <= 0) return;
+  reglasTimerIv = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (reglasSegundosRestantes > 0) {
+      reglasSegundosRestantes -= 1;
+    }
+    if (reglasSegundosRestantes <= 0) {
+      detenerTemporizadorReglas();
+    }
+    actualizarEstadoPuertaReglas();
+  }, 1000);
+}
+
+function mostrarPantallaReglas() {
+  detenerTemporizadorReglas();
+  estado.enPartida = false;
+  estado.reglasAceptadas = false;
+  reglasSegundosRestantes = REGLAS_MIN_SEGUNDOS;
+  reglasScrollCompletado = false;
+  if (chkAceptarReglas) chkAceptarReglas.checked = false;
+  if (cartonEl) cartonEl.innerHTML = '';
+  if (pantallaJuego) pantallaJuego.style.display = 'none';
+  if (pantallaLogin) pantallaLogin.style.display = 'none';
+  if (pantallaReglas) pantallaReglas.style.display = 'flex';
+  if (reglasScrollEl) reglasScrollEl.scrollTop = 0;
+
+  const evaluarScrollInicial = () => {
+    verificarScrollReglas();
+    actualizarEstadoPuertaReglas();
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    actualizarEstadoPuertaReglas();
+    requestAnimationFrame(evaluarScrollInicial);
+  } else {
+    evaluarScrollInicial();
+  }
+  iniciarTemporizadorReglas();
+}
+
 function resetearEstadoPartidaLocal({
   mantenerNombre = true,
   mostrarLogin = true,
@@ -239,6 +368,10 @@ function resetearEstadoPartidaLocal({
   clearTimeout(reclamoBingoTimer);
   reclamoLineaPendiente = false;
   reclamoBingoPendiente = false;
+  detenerTemporizadorReglas();
+  reglasSegundosRestantes = REGLAS_MIN_SEGUNDOS;
+  reglasScrollCompletado = false;
+  if (chkAceptarReglas) chkAceptarReglas.checked = false;
   borrarSesionJugador();
   Object.assign(estado, {
     nombre: nombrePrevio,
@@ -249,6 +382,7 @@ function resetearEstadoPartidaLocal({
     recibimoBingo: false,
     enPartida: false,
     partidaId: 0,
+    reglasAceptadas: false,
   });
   delete estado.pendienteCarton;
   reclamacionesHabilitadas = false;
@@ -259,6 +393,7 @@ function resetearEstadoPartidaLocal({
   clearTimeout(penTimerBingo);
   desbloquearTodo();
   actualizarEstadoVisualBotones();
+  actualizarEstadoPuertaReglas();
 
   if (cartonEl) cartonEl.innerHTML = '';
   if (pantallaReglas) pantallaReglas.style.display = 'none';
@@ -552,15 +687,38 @@ function emitirUnionJugador() {
 
 btnEntrar.addEventListener('click', intentarEntrar);
 
-document.getElementById('btn-aceptar-reglas')?.addEventListener('click', () => {
-  pantallaReglas.style.display = 'none';
+reglasScrollEl?.addEventListener('scroll', () => {
+  verificarScrollReglas();
+  actualizarEstadoPuertaReglas();
+});
+
+chkAceptarReglas?.addEventListener('change', () => {
+  actualizarEstadoPuertaReglas();
+});
+
+window.addEventListener('resize', () => {
+  if (pantallaReglas && pantallaReglas.style.display !== 'none' && estado.pendienteCarton) {
+    verificarScrollReglas();
+    actualizarEstadoPuertaReglas();
+  }
+});
+
+btnAceptarReglas?.addEventListener('click', () => {
+  if (!puedeAceptarReglas()) {
+    actualizarEstadoPuertaReglas();
+    return;
+  }
+  detenerTemporizadorReglas();
+  estado.reglasAceptadas = true;
+  if (pantallaReglas) pantallaReglas.style.display = 'none';
   // En este punto ya tenemos el cartón del servidor,
   // así que pasamos directamente a la pantalla de juego
   if (estado.pendienteCarton) {
     const { carton, cantadas, marcadas, partidaId } = estado.pendienteCarton;
     if (Number.isFinite(partidaId)) estado.partidaId = partidaId;
+    const cantadasActuales = estado.cantadas.size > 0 ? Array.from(estado.cantadas) : (cantadas || []);
     delete estado.pendienteCarton;
-    pasarAPantallaJuego(carton, cantadas, marcadas);
+    pasarAPantallaJuego(carton, cantadasActuales, marcadas);
   }
 });
 
@@ -570,10 +728,12 @@ document.getElementById('input-discord')?.addEventListener('keydown', e => {
 });
 
 function pasarAPantallaJuego(carton, cantadas, marcadasIniciales) {
-  estado.carton  = carton;
-  estado.cantadas = new Set(cantadas);
-  estado.marcadas = marcadasIniciales ? new Set(marcadasIniciales) : new Set();
-  estado.enPartida = true;
+  detenerTemporizadorReglas();
+  estado.carton          = carton;
+  estado.cantadas        = new Set(cantadas);
+  estado.marcadas        = marcadasIniciales ? new Set(marcadasIniciales) : new Set();
+  estado.reglasAceptadas = true;
+  estado.enPartida       = true;
 
   pantallaLogin.style.display  = 'none';
   pantallaReglas.style.display = 'none';
@@ -721,6 +881,8 @@ socket.on('tu:carton', ({ partidaId, carton, cantadas, marcadas, lineaGanada, bi
   if (!mismaPartida && !restauracionLocal) {
     estado.recibimoLinea = false;
     estado.recibimoBingo = false;
+    estado.reglasAceptadas = false;
+    delete estado.pendienteCarton;
     penalizadoLinea = false;
     penalizadoBingo = false;
     clearTimeout(penTimerLinea);
@@ -742,18 +904,35 @@ socket.on('tu:carton', ({ partidaId, carton, cantadas, marcadas, lineaGanada, bi
   estado.marcadas = new Set(marcadasRestauradas);
 
   const esReconexion = marcadasRestauradas.length > 0;
-  if (reconexionEnEstaPagina || restauracionLocal || esReconexion) {
+  const reglasAceptadasEnEstaPartida = Boolean(
+    (reconexionEnEstaPagina && estado.reglasAceptadas) ||
+    (restauracionLocal && sesionJugadorGuardada && sesionJugadorGuardada.reglasAceptadas) ||
+    esReconexion
+  );
+  const leyendoReglasMismaPartida = Boolean(
+    estado.pendienteCarton &&
+    mismaPartida &&
+    pantallaReglas &&
+    pantallaReglas.style.display === 'flex'
+  );
+
+  if (reglasAceptadasEnEstaPartida) {
+    delete estado.pendienteCarton;
     pasarAPantallaJuego(carton, cantadas, marcadasRestauradas);
     mostrarNotif('Reconectado. Tu cartón fue restaurado.', 'ok');
-  } else {
-    // Primera vez: mostrar pantalla de reglas
+  } else if (leyendoReglasMismaPartida) {
     estado.cantadas = new Set(cantadas || []);
     estado.enPartida = false;
-    estado.pendienteCarton = { carton, cantadas, marcadas, partidaId: idRecibido };
-    if (cartonEl) cartonEl.innerHTML = '';
-    if (pantallaJuego) pantallaJuego.style.display = 'none';
-    if (pantallaLogin) pantallaLogin.style.display = 'none';
-    if (pantallaReglas) pantallaReglas.style.display = 'flex';
+    estado.reglasAceptadas = false;
+    estado.pendienteCarton = { carton, cantadas, marcadas: marcadasRestauradas, partidaId: idRecibido };
+    guardarSesionJugador();
+  } else {
+    // Primera vez en la partida o reglas aún pendientes: exigir lectura obligatoria
+    estado.cantadas = new Set(cantadas || []);
+    estado.enPartida = false;
+    estado.reglasAceptadas = false;
+    estado.pendienteCarton = { carton, cantadas, marcadas: marcadasRestauradas, partidaId: idRecibido };
+    mostrarPantallaReglas();
     guardarSesionJugador();
     mostrarNotif('Cartón asignado. Lee las reglas y pulsa continuar.', 'ok');
   }
@@ -777,6 +956,7 @@ socket.on('tu:carton', ({ partidaId, carton, cantadas, marcadas, lineaGanada, bi
 // nueva frase cantada desde el gestor
 socket.on('partida:frase-cantada', ({ frase, cantadas }) => {
   estado.cantadas = new Set(cantadas);
+  if (estado.pendienteCarton) estado.pendienteCarton.cantadas = cantadas;
   actualizarTodasLasCeldas();
   actualizarEstadoVisualBotones();
   if (navigator.vibrate) navigator.vibrate(80);
@@ -1028,7 +1208,21 @@ function verificarSincronizacionAlVolver(forzar = false) {
     if (resp.carton && !mismasTarjetas(estado.carton, resp.carton)) {
       estado.carton = resp.carton;
       estado.marcadas = new Set(resp.marcadas || []);
-      pasarAPantallaJuego(resp.carton, resp.cantadas || [], resp.marcadas || []);
+      if (estado.reglasAceptadas || (resp.marcadas && resp.marcadas.length > 0)) {
+        pasarAPantallaJuego(resp.carton, resp.cantadas || [], resp.marcadas || []);
+      } else {
+        estado.cantadas = new Set(resp.cantadas || []);
+        estado.pendienteCarton = {
+          carton: resp.carton,
+          cantadas: resp.cantadas || [],
+          marcadas: resp.marcadas || [],
+          partidaId: resp.partidaId || estado.partidaId || 0,
+        };
+        mostrarPantallaReglas();
+        guardarSesionJugador();
+      }
+    } else if (estado.pendienteCarton && !estado.reglasAceptadas) {
+      estado.pendienteCarton.cantadas = resp.cantadas || [];
     } else {
       actualizarTodasLasCeldas();
       actualizarBotones();
@@ -1097,8 +1291,24 @@ function restaurarSesionLocal() {
   estado.nombre = sesionJugadorGuardada.nombre;
   estado.carton = sesionJugadorGuardada.carton;
   estado.marcadas = new Set(sesionJugadorGuardada.marcadas);
-  estado.enPartida = true;
   if (nombreDisplay) nombreDisplay.textContent = estado.nombre;
+
+  if (!sesionJugadorGuardada.reglasAceptadas) {
+    estado.enPartida = false;
+    estado.reglasAceptadas = false;
+    estado.pendienteCarton = {
+      carton: estado.carton,
+      cantadas: [],
+      marcadas: Array.from(estado.marcadas),
+      partidaId: estado.partidaId,
+    };
+    mostrarPantallaReglas();
+    mostrarNotif('Lee las reglas hasta el final para ver tu cartón.', 'info', 4000);
+    return;
+  }
+
+  estado.enPartida = true;
+  estado.reglasAceptadas = true;
   pasarAPantallaJuego(estado.carton, [], Array.from(estado.marcadas));
   actualizarBotones();
   mostrarNotif('Recuperando tu partida. Tus marcas están guardadas en este dispositivo…', 'info', 0);
@@ -1109,6 +1319,7 @@ restaurarSesionLocal();
 // el gestor desmarcó una frase (error del gestor al cantar)
 socket.on('partida:frase-descantada', ({ frase, cantadas }) => {
   estado.cantadas = new Set(cantadas);
+  if (estado.pendienteCarton) estado.pendienteCarton.cantadas = cantadas;
   // si el jugador la tenía marcada, la desmarcamos también
   if (estado.marcadas.has(frase)) {
     estado.marcadas.delete(frase);
