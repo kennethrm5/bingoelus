@@ -88,7 +88,26 @@ Para eludir los bloqueos de IP en España sin exponer la IP pública de la máqu
 - **Watchdog Autónomo (`cloudflared-watchdog`):** Timer de *systemd* que ejecuta comprobaciones cada 30s sobre `/healthz` (salud local) y la URL pública. Ante degradación o caída del socket, aplica autocorrección y reinicio ordenado del servicio.
 - **Backup Híbrido Incremental (`bingoelus-backup`):**
   - **Inmediato (UX / Streamer):** Notificación asíncrona no bloqueante vía **Discord Webhooks** (`multipart/form-data`) al cantar un cartón o finalizar partida, enviando resúmenes `.txt` y los `.png` de cartones ganadores.
-  - **Programado (DR / Disaster Recovery):** Sincronización periódica incremental mediante `gsutil` hacia un bucket de **Google Cloud Storage (`gs://...`)**, con rotación `.tar.gz` y retención de 30 días.
+  - **Programado y en Vivo (DR / Disaster Recovery):** Timer de *systemd* cada **1 minuto** que sincroniza en vivo `/opt/bingoelus/datos` (incluyendo `estado-partida.json`) hacia el espejo local y `live/` en **Google Cloud Storage** (`gsutil`) / `rclone`, además de mantener rotación `.tar.gz` con retención de 30 días para `ganadores/` y `resultados/` y restauración de emergencia mediante `restore-state.sh`.
+
+### 🛡️ Resiliencia ante Caídas y Continuidad en Directo
+El sistema incorpora salvaguardas multicapa para evitar la pérdida de una partida en curso si la VM se reinicia o cae de forma repentina durante un directo, o si el gestor/moderador pierde conectividad temporal:
+
+- **Persistencia Atómica de la Partida (`datos/estado-partida.json`):**
+  - Cada cambio relevante de la partida se escribe de forma atómica en disco (archivo temporal `.tmp` + `fsync` + rotación a `.bak` + `rename`), con *debounce* rápido (~150 ms) en eventos críticos y agrupado (~1.5 s, máximo 4 s) en lotes.
+  - Ante señales `SIGTERM` / `SIGINT`, el servidor realiza un volcado síncrono inmediato antes de salir.
+  - Al arrancar, `cargarEstadoPartida()` restaura automáticamente la partida activa desde `estado-partida.json` (con respaldo automático en `.bak`), expone métricas de estado/persistencia en `/healthz` y conserva a los ganadores ya desconectados en el resumen final enviado a Discord y archivos `.txt`.
+- **Sesiones *Stateless* de Twitch (`twitch_sid`):**
+  - La sesión de moderación usa una cookie firmada con HMAC-SHA256 (`v1.<payload>.<hmac>`) cuya clave deriva de `sessionSecret` (o respaldo con `gestorToken:clientSecret`), con flags `HttpOnly`, `SameSite=Lax` y `Secure` bajo HTTPS.
+  - Al no depender de memoria volátil del proceso, la autenticación sobrevive a reinicios del servidor o de la VM; el cierre de sesión explícito revoca la cookie vía `/auth/twitch/logout`.
+- **Reconexión Resiliente de Clientes:**
+  - **Gestor Electron y Moderadores (`gestor.html` y `servidor/public/moderador.html`):** Reconexión automática infinita con *backoff* (`1 s`–`5 s`, `randomizationFactor: 0.3`) ante caídas de red o reinicios de VM (solo regresa a la pantalla de login si recibe `Forbidden`). Incluyen banner de estado (`#banner-conexion`) con controles para reconectar manualmente o cambiar de conexión y resincronización automática al reconectar mediante `estado:actual`.
+  - **Jugadores (`servidor/public/cliente.js`):** Persistencia local del cartón y casillas marcadas en `localStorage` (`bingoelus-player-session`) junto con reconexión automática con *backoff* y *jitter* (`1 s`–`6 s`, `randomizationFactor: 0.5`) para evitar avalanchas simultáneas tras una caída.
+- **Backup en Vivo fuera de la VM (`bingoelus-backup`):**
+  - `bingoelus-backup.timer` se ejecuta cada **1 minuto** con `LIVE_ONLY_DIRS=/opt/bingoelus/datos` (excluyendo `*.tmp`) hacia el espejo local y `live/` en GCS/`rclone` (con cadencia remota configurable vía `REMOTE_SYNC_EVERY_MINUTES=10`, RPO objetivo en disco ≤ 60 s y sin generar archivos `.tar.gz` cada minuto).
+  - Los directorios históricos `ganadores/` y `resultados/` conservan archivado incremental `.tar.gz` con retención de 30 días.
+- **Auditoría, Endurecimiento de VM y Recuperación (`servidor/ops/`):**
+  - Scripts operativos `audit-vm.sh` (auditoría de seguridad y resiliencia), `harden-vm.sh` (endurecimiento del sistema en GCP) y `restore-state.sh` (recuperación de estado desde espejo local o GCS). Consulta todos los detalles en [servidor/ops/README.md](servidor/ops/README.md).
 
 ---
 
@@ -117,6 +136,7 @@ Edita el archivo de configuración generado e inyecta las credenciales requerida
   "gestorToken": "TU_GESTOR_TOKEN_SECRETO",
   "twitchClientId": "TU_TWITCH_CLIENT_ID",
   "twitchClientSecret": "TU_TWITCH_CLIENT_SECRET",
+  "sessionSecret": "TU_SESSION_SECRET_OPCIONAL",
   "discordWebhookUrl": "https://discord.com/api/webhooks/TU_WEBHOOK_URL"
 }
 ```
@@ -134,6 +154,23 @@ Para aplicar cambios en producción sin alterar estados ni archivos generados en
 ```bash
 cd /opt/bingoelus-repo
 bash servidor/ops/gcp/update.sh
+```
+
+### 4. Endurecimiento de la VM y Recuperación de Emergencia
+Comandos operativos para auditar/endurecer la VM en GCP y recuperar el estado de una partida ante una caída grave (ver guía completa en [servidor/ops/README.md](servidor/ops/README.md)):
+
+```bash
+# 1. Auditar estado de seguridad y resiliencia de la VM
+cd /opt/bingoelus-repo
+bash servidor/ops/gcp/audit-vm.sh
+
+# 2. Previsualizar y aplicar endurecimiento de la VM
+bash servidor/ops/gcp/harden-vm.sh --dry-run
+sudo bash /opt/bingoelus/ops/gcp/harden-vm.sh
+
+# 3. Restaurar estado de partida desde GCS (simulación y ejecución con reinicio de PM2)
+bash servidor/ops/backup/restore-state.sh --from-gcs --dry-run
+bash servidor/ops/backup/restore-state.sh --from-gcs --restart-pm2
 ```
 
 ---
