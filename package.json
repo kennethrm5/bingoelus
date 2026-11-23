@@ -6,11 +6,12 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win",
+    "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win --publish never",
     "test:sync": "node --test test/sync-offline.test.js"
   },
   "dependencies": {
     "compression": "^1.8.1",
+    "electron-updater": "^6.8.11",
     "express": "^4.18.3",
     "socket.io": "^4.8.3"
   },
@@ -23,6 +24,13 @@
     "appId": "com.kennethrm5.bingoelus",
     "productName": "Bingoelus",
     "asar": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kennethrm5",
+        "repo": "bingoelus"
+      }
+    ],
     "win": {
       "target": [
         {
@@ -46,6 +54,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "updater.js",
+      "updater.html",
       "gestor.html",
       "media/**/*",
       "package.json"
