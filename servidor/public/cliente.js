@@ -40,7 +40,14 @@ function cargarSesionJugador() {
 }
 
 const sesionJugadorGuardada = cargarSesionJugador();
-const socket = io('/jugador', { transports: ['websocket', 'polling'] });
+const socket = io('/jugador', {
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 6000,
+  randomizationFactor: 0.5,
+});
 
 // estado local del jugador
 const estado = {

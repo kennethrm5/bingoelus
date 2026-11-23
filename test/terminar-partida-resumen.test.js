@@ -220,6 +220,7 @@ before(async () => {
       DISCORD_ATTACH_RESULTS: '1',
       RESULTS_DIR: path.join(tmpDir, 'resultados'),
       TWITCH_BANS_FILE: path.join(tmpDir, 'cuentas-baneadas.json'),
+      GAME_STATE_FILE: path.join(tmpDir, 'estado-partida.json'),
     },
     stdio: 'pipe',
   });

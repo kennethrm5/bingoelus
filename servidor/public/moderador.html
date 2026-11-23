@@ -757,6 +757,52 @@
       .connect-card h2 { font-size: 1.35rem; }
     }
 
+    #banner-conexion {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 10px 20px;
+      background: linear-gradient(90deg, rgba(127, 29, 29, .92), rgba(69, 10, 10, .95));
+      border-bottom: 1px solid rgba(215, 125, 104, .55);
+      color: #fde8e2;
+      font-size: .86rem;
+      font-weight: 600;
+      z-index: 90;
+    }
+    #banner-conexion.visible { display: flex; }
+    .banner-conexion-info { display: flex; align-items: center; gap: 10px; }
+    .banner-conexion-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, .7);
+      animation: pulso-conexion 1.2s ease-in-out infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes pulso-conexion {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .45; transform: scale(.85); }
+    }
+    .banner-conexion-acciones { display: flex; align-items: center; gap: 8px; }
+    .banner-conexion-acciones button {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 215, 101, .45);
+      background: rgba(255, 215, 101, .14);
+      color: #ffe08a;
+      font-size: .78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .banner-conexion-acciones button:hover { background: rgba(255, 215, 101, .24); }
+    .banner-conexion-acciones button.secundario {
+      border-color: rgba(255, 255, 255, .25);
+      background: rgba(0, 0, 0, .28);
+      color: #f3e9dc;
+    }
   </style>
 </head>
 <body>
@@ -799,6 +845,17 @@
     </div>
   </div>
 </header>
+
+<div id="banner-conexion" role="status" aria-live="polite">
+  <div class="banner-conexion-info">
+    <span class="banner-conexion-dot" aria-hidden="true"></span>
+    <span id="banner-conexion-msg">Conexión perdida con el servidor. Reintentando automáticamente…</span>
+  </div>
+  <div class="banner-conexion-acciones">
+    <button type="button" onclick="reconectarAhora()">Reconectar ahora</button>
+    <button type="button" class="secundario" onclick="abrirOverlayConexion()">Cambiar conexión</button>
+  </div>
+</div>
 
 <!-- --------------- MAIN --------------- -->
 <main>
@@ -904,9 +961,54 @@
 
   // -- Conexión diferida — el gestor introduce URL y token ------
   let socket = null;
+  let conectadoAlgunaVez = false;
+  let credencialesConexion = null;
 
-  // Pre-rellenar con la última URL usada
-  
+  function mostrarBannerConexion(msg) {
+    const banner = document.getElementById('banner-conexion');
+    const msgEl = document.getElementById('banner-conexion-msg');
+    if (msgEl && msg) msgEl.textContent = msg;
+    if (banner) banner.classList.add('visible');
+  }
+
+  function ocultarBannerConexion() {
+    const banner = document.getElementById('banner-conexion');
+    if (banner) banner.classList.remove('visible');
+  }
+
+  function esErrorAutenticacion(err) {
+    return String((err && err.message) || '').toLowerCase().includes('forbidden');
+  }
+
+  function limpiarSocketActual() {
+    if (!socket) return;
+    socket.removeAllListeners();
+    if (socket.io) socket.io.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+
+  function abrirOverlayConexion(mensaje = '') {
+    limpiarSocketActual();
+    ocultarBannerConexion();
+    const overlay = document.getElementById('overlay-conexion');
+    const errEl = document.getElementById('connect-error');
+    if (overlay) overlay.style.display = 'flex';
+    if (errEl) errEl.textContent = mensaje;
+  }
+  window.abrirOverlayConexion = abrirOverlayConexion;
+
+  function emitirAlServidor(evento, payload) {
+    if (!socket || !socket.connected) {
+      if (typeof agregarLog === 'function') {
+        agregarLog('Sin conexión con el servidor. Espera a que reconecte.', 'error');
+      }
+      return false;
+    }
+    if (payload === undefined) socket.emit(evento);
+    else socket.emit(evento, payload);
+    return true;
+  }
 
   function conectar() {
     const url = window.location.origin;
@@ -914,10 +1016,40 @@
     const errEl = document.getElementById('connect-error');
     if (!token) { errEl.textContent = 'Completa el token de moderador.'; return; }
     errEl.textContent = 'Conectando…';
-    socket = io(url + '/gestor', { transports: ['websocket', 'polling'], auth: { token } });
+    credencialesConexion = { url, token };
+    limpiarSocketActual();
+    socket = io(url + '/gestor', {
+      transports: ['websocket', 'polling'],
+      auth: { token },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.3,
+      timeout: 10000,
+    });
     registrarEventos();
   }
   window.conectar = conectar;
+
+  function reconectarAhora() {
+    if (socket) {
+      mostrarBannerConexion('Reintentando conexión con el servidor…');
+      if (!socket.connected) socket.connect();
+      return;
+    }
+    if (credencialesConexion) {
+      document.getElementById('input-gestor-token').value = credencialesConexion.token;
+      conectar();
+      return;
+    }
+    abrirOverlayConexion();
+  }
+  window.reconectarAhora = reconectarAhora;
+
+  window.addEventListener('online', () => {
+    if (socket && !socket.connected) socket.connect();
+  });
 
   // -- Estado local (mirror del servidor para renderizar) -
   let estadoLocal = {
@@ -987,10 +1119,10 @@
     }
 
     const emitir = () => {
-      if (!socket) return;
+      if (!socket || !socket.connected) return;
       const requestId = ++busquedaReqSeq;
       busquedaReqPendiente = requestId;
-      socket.emit('gestor:buscar-jugadores', { q, limit: 50, requestId });
+      emitirAlServidor('gestor:buscar-jugadores', { q, limit: 50, requestId });
     };
 
     if (inmediata) emitir();
@@ -1101,7 +1233,7 @@
     link.click();
 
     // Envía la imagen al servidor para que la guarde en la VM GCP
-    socket.emit('gestor:guardar-carton', {
+    emitirAlServidor('gestor:guardar-carton', {
       nombre: jugador.nombre,
       twitch: jugador.twitch || '',
       tipoPremio: tipoPremio,
@@ -1176,7 +1308,7 @@
       
       if (!btn.disabled) {
         btn.addEventListener('click', () => {
-          socket.emit('gestor:cantar-frase', { frase });
+          emitirAlServidor('gestor:cantar-frase', { frase });
         });
       }
 
@@ -1198,7 +1330,7 @@
         btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(231,173,24,.12)'; });
         btnD.addEventListener('mouseout',  () => { btnD.style.background = 'transparent'; });
         btnD.addEventListener('click', () => {
-          socket.emit('gestor:desmarcar-frase', { frase });
+          emitirAlServidor('gestor:desmarcar-frase', { frase });
         });
         wrapper.appendChild(btnD);
       }
@@ -1297,7 +1429,7 @@
 
         select.addEventListener('change', (e) => {
           actualizarEstilo(e.target);
-          socket.emit('gestor:toggle-verificacion', { frase, estado: e.target.value });
+          emitirAlServidor('gestor:toggle-verificacion', { frase, estado: e.target.value });
         });
 
         colEstado.appendChild(select);
@@ -1472,7 +1604,7 @@
         btnBanear.addEventListener('click', (ev) => {
           ev.stopPropagation();
           if (!confirm(`¿Banear permanentemente a @${loginTwitch}? No podrá volver a entrar hasta que se desbanee.`)) return;
-          socket.emit('gestor:banear-twitch', { login: loginTwitch });
+          emitirAlServidor('gestor:banear-twitch', { login: loginTwitch });
         });
         acciones.appendChild(btnBanear);
       }
@@ -1512,7 +1644,7 @@
       boton.textContent = 'Desbanear';
       boton.addEventListener('click', () => {
         if (!confirm(`¿Desbanear a @${cuenta.login}?`)) return;
-        socket.emit('gestor:desbanear-twitch', { login: cuenta.login });
+        emitirAlServidor('gestor:desbanear-twitch', { login: cuenta.login });
       });
       fila.append(login, boton);
       lista.appendChild(fila);
@@ -1605,7 +1737,12 @@
 
   function registrarEventos() {
     socket.on('connect', () => {
+      const eraReconexion = conectadoAlgunaVez;
+      conectadoAlgunaVez = true;
       document.getElementById('overlay-conexion').style.display = 'none';
+      const errEl = document.getElementById('connect-error');
+      if (errEl) errEl.textContent = '';
+      ocultarBannerConexion();
       const url = window.location.origin;
       document.getElementById('txt-url').textContent = url;
 
@@ -1615,21 +1752,51 @@
         estadoLocal.jugadoresBusqueda = [];
       }
 
-      agregarLog('Conectado al servidor.', 'ok');
+      agregarLog(eraReconexion ? 'Reconectado al servidor.' : 'Conectado al servidor.', 'ok');
     });
     socket.on('connect_error', (err) => {
-      const errEl = document.getElementById('connect-error');
-      const message = err.message || 'no se pudo conectar.';
-      if (errEl) {
-        errEl.textContent = message.toLowerCase() === 'websocket error'
-          ? 'Servidor no conectado'
-          : 'Error: ' + message;
+      if (esErrorAutenticacion(err)) {
+        limpiarSocketActual();
+        ocultarBannerConexion();
+        const overlay = document.getElementById('overlay-conexion');
+        if (overlay) overlay.style.display = 'flex';
+        const errEl = document.getElementById('connect-error');
+        if (errEl) errEl.textContent = 'Token incorrecto (acceso denegado).';
+        agregarLog('Error de autenticación con el servidor (token inválido).', 'error');
+        return;
       }
-      if (socket) { socket.disconnect(); socket = null; }
+
+      const message = (err && err.message) ? err.message : 'no se pudo conectar.';
+      const texto = message.toLowerCase() === 'websocket error'
+        ? 'Servidor no disponible. Reintentando automáticamente…'
+        : `Error de conexión (${message}). Reintentando automáticamente…`;
+      if (conectadoAlgunaVez) {
+        mostrarBannerConexion(texto);
+      } else {
+        const errEl = document.getElementById('connect-error');
+        if (errEl) errEl.textContent = texto;
+      }
     });
-    socket.on('disconnect', () => {
-      agregarLog('Desconectado del servidor.', 'error');
+    socket.on('disconnect', (reason) => {
+      mostrarBannerConexion('Conexión perdida con el servidor. Reintentando automáticamente…');
+      agregarLog(`Desconectado del servidor (${reason || 'sin motivo'}). Reintentando…`, 'error');
+      if (reason === 'io server disconnect' && socket) {
+        setTimeout(() => {
+          if (socket && !socket.connected) socket.connect();
+        }, 1000);
+      }
     });
+    if (socket.io) {
+      socket.io.on('reconnect_attempt', (intento) => {
+        const msg = `Reconectando con el servidor… (intento ${intento})`;
+        if (conectadoAlgunaVez) {
+          mostrarBannerConexion(msg);
+        } else {
+          const errEl = document.getElementById('connect-error');
+          if (errEl) errEl.textContent = msg;
+        }
+      });
+    }
 
     // Estado completo (al conectar o tras reset)
     socket.on('estado:actual', (data) => {
@@ -1825,13 +1992,13 @@
       return;
     }
 
-    socket.emit('gestor:iniciar-partida', { frases });
+    if (!emitirAlServidor('gestor:iniciar-partida', { frases })) return;
     agregarLog(`Partida iniciada con ${frases.length} frases.`, 'ok');
   });
 
   btnResetear.addEventListener('click', () => {
     if (confirm('¿Seguro que quieres resetear la partida? Se borrarán todos los datos.')) {
-      socket.emit('gestor:resetear');
+      if (!emitirAlServidor('gestor:resetear')) return;
       inputFrases.value = '';
       agregarLog('Partida reseteada.', 'warn');
     }
@@ -1839,16 +2006,17 @@
 
   document.getElementById('btn-reclamaciones').addEventListener('click', () => {
     if (reclamacionesActivas) {
-      socket.emit('gestor:deshabilitar-reclamaciones');
+      emitirAlServidor('gestor:deshabilitar-reclamaciones');
     } else {
-      socket.emit('gestor:habilitar-reclamaciones');
+      emitirAlServidor('gestor:habilitar-reclamaciones');
     }
   });
 
   document.getElementById('btn-umbral').addEventListener('click', () => {
     const umbral = Math.max(0, Math.min(25, parseInt(document.getElementById('input-umbral').value, 10) || 0));
-    socket.emit('gestor:set-umbral', { umbral });
-    agregarLog(`Umbral aplicado: ${umbral} casilla(s) mínima(s) para reclamar.`, 'info');
+    if (emitirAlServidor('gestor:set-umbral', { umbral })) {
+      agregarLog(`Umbral aplicado: ${umbral} casilla(s) mínima(s) para reclamar.`, 'info');
+    }
   });
 
   btnCopiar.addEventListener('click', () => {
@@ -1864,8 +2032,9 @@
   const btnSyncExcel = document.getElementById('btn-sync-excel');
   if (btnSyncExcel) {
     btnSyncExcel.addEventListener('click', () => {
-      socket.emit('gestor:sync-excel');
-      agregarLog('Sincronización de Excel forzada para todos los usuarios.', 'info');
+      if (emitirAlServidor('gestor:sync-excel')) {
+        agregarLog('Sincronización de Excel forzada para todos los usuarios.', 'info');
+      }
     });
   }
 
