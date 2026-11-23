@@ -220,6 +220,7 @@ before(async () => {
       DISCORD_ATTACH_RESULTS: '1',
       RESULTS_DIR: path.join(tmpDir, 'resultados'),
       TWITCH_BANS_FILE: path.join(tmpDir, 'cuentas-baneadas.json'),
+      GAME_STATE_FILE: path.join(tmpDir, 'estado-partida.json'),
     },
     stdio: 'pipe',
   });
@@ -303,22 +304,25 @@ test('multi-tab and reconnect before old socket disconnects neither drops nor du
 
   const tokenD = 'multitab-player-token';
   const { player: socket1, card: cardD, twitch: twitchD } = await createPlayer('MultiTab', tokenD);
+  await waitForOnlineCount(1);
+
+  const socket1Disconnected = waitFor(socket1, 'disconnect');
   const { player: socket2 } = await createPlayer('MultiTab', tokenD);
-  await waitForOnlineCount(2);
+  await socket1Disconnected;
+  await waitForOnlineCount(1);
 
   const row0 = cardD.carton[0];
   await singPhrases(manager, sungSet, row0);
   await enableClaims(manager);
 
-  const lineaAck = waitFor(socket1, 'tu:linea-valida');
-  socket1.emit('jugador:pedir-linea', { marcadas: row0 });
+  const lineaAck = waitFor(socket2, 'tu:linea-valida');
+  socket2.emit('jugador:pedir-linea', { marcadas: row0 });
   await lineaAck;
 
-  socket2.disconnect();
-  await waitForOnlineCount(1);
-
+  const socket2Disconnected = waitFor(socket2, 'disconnect');
   const { player: socket3 } = await createPlayer('MultiTab', tokenD);
-  await waitForOnlineCount(2);
+  await socket2Disconnected;
+  await waitForOnlineCount(1);
 
   const endedPromise = waitFor(manager, 'partida:juego-terminado');
   const webhookPromise = nextWebhook();
@@ -336,7 +340,6 @@ test('multi-tab and reconnect before old socket disconnects neither drops nor du
     assert.equal(matchesTxt.length, 1);
   })]);
 
-  socket1.disconnect();
   socket3.disconnect();
   manager.disconnect();
 });

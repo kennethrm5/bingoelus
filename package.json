@@ -1,6 +1,6 @@
 {
   "name": "bingoelus",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Juego de bingo personalizado con frases - gestor Electron, jugadores por navegador",
   "author": "@kennethrm5",
   "main": "main.js",
@@ -44,13 +44,11 @@
       "createStartMenuShortcut": true
     },
     "files": [
-      "**/*",
-      "!resultados/**",
-      "!dist/**",
-      "!servidor/**",
-      "!*.exe",
-      "!.gitignore",
-      "!*.md"
+      "main.js",
+      "preload.js",
+      "gestor.html",
+      "media/**/*",
+      "package.json"
     ]
   }
 }
