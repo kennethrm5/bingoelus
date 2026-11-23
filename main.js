@@ -1,4 +1,4 @@
-﻿// main.js — proceso principal de Electron
+// main.js — proceso principal de Electron
 // Sirve gestor.html localmente y abre la ventana del gestor.
 // Toda la lógica del juego corre en el servidor remoto (servidor/server.js en la VM).
 
@@ -8,6 +8,8 @@ const { app, BrowserWindow, dialog } = require('electron');
 const path    = require('path');
 const http    = require('http');
 const express = require('express');
+const { autoUpdater } = require('electron-updater');
+const { crearControladorActualizacion } = require('./updater');
 
 app.setAppUserModelId('com.kennethrm5.bingoelus');
 
@@ -18,12 +20,16 @@ const xApp = express();
 xApp.get('/gestor', (_req, res) => {
   res.sendFile(path.join(__dirname, 'gestor.html'));
 });
+xApp.get('/updater', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'updater.html'));
+});
 xApp.use('/media', express.static(path.join(__dirname, 'media')));
 const servidorLocal = http.createServer(xApp);
 
 // ─── Ventana Electron ─────────────────────────────────────────
 
 let mainWindow;
+let controladorActualizacion;
 
 function crearVentana() {
   mainWindow = new BrowserWindow({
@@ -73,6 +79,12 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    const updateWin = controladorActualizacion?.getUpdateWindow();
+    if (updateWin && !updateWin.isDestroyed()) {
+      if (updateWin.isMinimized()) updateWin.restore();
+      updateWin.focus();
+      return;
+    }
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
@@ -82,6 +94,17 @@ if (!app.requestSingleInstanceLock()) {
     try {
       await iniciarServidorLocal();
       crearVentana();
+      controladorActualizacion = crearControladorActualizacion({
+        app,
+        BrowserWindow,
+        dialog,
+        autoUpdater,
+        getMainWindow: () => mainWindow,
+        getBaseUrl: () => `http://127.0.0.1:${portLocal}`,
+        iconPath: path.join(__dirname, 'media', 'bingoelus-app-icon.png'),
+        preloadPath: path.join(__dirname, 'preload.js'),
+      });
+      controladorActualizacion.iniciarComprobacionAlArranque();
     } catch (error) {
       console.error('No se pudo iniciar el servidor local del gestor:', error);
       dialog.showErrorBox(

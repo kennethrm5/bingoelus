@@ -60,6 +60,8 @@ Para eludir los bloqueos de IP en España sin exponer la IP pública de la máqu
 
 ### Arquitectura de Clientes
 - **Gestor (Panel de Control):** Aplicación de escritorio nativa desarrollada en Electron, conectada por WebSocket con cifrado y token de autorización.
+  - **Auto-actualización (`electron-updater`):** Al abrir la aplicación empaquetada, comprueba automáticamente si hay una versión más reciente en GitHub Releases (`latest.yml`). Si existe actualización del instalador, oculta temporalmente la ventana principal, muestra una ventana de progreso dedicada ([updater.html](updater.html)) hasta descargarla e instala en silencio reiniciando la aplicación automáticamente.
+  - **Artefactos por Release de escritorio:** Cada vez que se publique una nueva versión del gestor en GitHub Releases deben adjuntarse los tres archivos generados en `dist/`: `Bingoelus-Setup-<version>.exe`, `Bingoelus-Setup-<version>.exe.blockmap` y `latest.yml`.
 - **Moderadores y Jugadores:** Interfaz web ligera en Vanilla JS/HTML5/CSS3 alojada en el servidor, accesible desde `https://bingoelus.online`.
 - **Servidor Central:** Orquestador de partidas, validador de premios en tiempo real y emisor de eventos mediante Socket.io.
 
