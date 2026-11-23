@@ -32,7 +32,9 @@ function cargarSesionJugador() {
     const marcadas = Array.isArray(sesion.marcadas)
       ? [...new Set(sesion.marcadas.filter(frase => typeof frase === 'string' && frasesCarton.has(frase)))]
       : [];
-    return { nombre: sesion.nombre.trim(), carton: sesion.carton, marcadas };
+    const partidaId = Number.isFinite(sesion.partidaId) && sesion.partidaId > 0 ? sesion.partidaId : 0;
+    const twitch = typeof sesion.twitch === 'string' ? sesion.twitch.trim().toLowerCase() : '';
+    return { nombre: sesion.nombre.trim(), carton: sesion.carton, marcadas, partidaId, twitch };
   } catch (error) {
     console.warn('[Cliente] No se pudo recuperar la sesión local del jugador:', error);
     return null;
@@ -40,7 +42,14 @@ function cargarSesionJugador() {
 }
 
 const sesionJugadorGuardada = cargarSesionJugador();
-const socket = io('/jugador', { transports: ['websocket', 'polling'] });
+const socket = io('/jugador', {
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 6000,
+  randomizationFactor: 0.5,
+});
 
 // estado local del jugador
 const estado = {
@@ -51,6 +60,7 @@ const estado = {
   recibimoLinea: false,
   recibimoBingo: false,
   enPartida: !!sesionJugadorGuardada,
+  partidaId: sesionJugadorGuardada ? (sesionJugadorGuardada.partidaId || 0) : 0,
 };
 
 // Si el gestor ha habilitado las reclamaciones
@@ -107,12 +117,15 @@ let btnCountdownIv = null;
 let _ultimoEnvioMarcadas = 0;
 let _timerEnvioMarcadas  = null;
 const RATE_MARCADAS_MS   = 120; // debe coincidir con el servidor
+const PING_ESTADO_TIMEOUT_MS = 2500;
 let _jugadorUnido = false;
 let _unionSolicitada = false;
 let _unionSocketId = null;
 let _socketRegistrado = false;
 let _marcadasPendientesSync = false;
 let _restauracionLocalPendiente = !!sesionJugadorGuardada;
+let _ocultoDesdeTs = 0;
+let _probeEnCurso = false;
 
 function mismasMarcadas(a, b) {
   const setA = new Set(a || []);
@@ -129,10 +142,15 @@ function mismasTarjetas(a, b) {
 function guardarSesionJugador() {
   if (!estado.nombre || !estado.carton.length) return;
   try {
+    const twitchGuardado = (twitchUser && typeof twitchUser.login === 'string' && twitchUser.login.trim())
+      ? twitchUser.login.trim().toLowerCase()
+      : ((sesionJugadorGuardada && typeof sesionJugadorGuardada.twitch === 'string') ? sesionJugadorGuardada.twitch : '');
     localStorage.setItem(PLAYER_SESSION_KEY, JSON.stringify({
       nombre: estado.nombre,
       carton: estado.carton,
       marcadas: Array.from(estado.marcadas),
+      partidaId: Number.isFinite(estado.partidaId) && estado.partidaId > 0 ? estado.partidaId : 0,
+      twitch: twitchGuardado,
     }));
   } catch (error) {
     console.warn('[Cliente] No se pudo guardar la sesión local del jugador:', error);
@@ -201,11 +219,68 @@ function mostrarBanner(msg, tipo) {
   bannerAnuncio.textContent   = msg;
 }
 
+function resetearEstadoPartidaLocal({
+  mantenerNombre = true,
+  mostrarLogin = true,
+  mensaje = '',
+  tipo = 'info',
+  duracion = 5000,
+} = {}) {
+  const nombrePrevio = mantenerNombre ? estado.nombre : '';
+  _jugadorUnido = false;
+  _unionSolicitada = false;
+  _unionSocketId = null;
+  _socketRegistrado = false;
+  _restauracionLocalPendiente = false;
+  _marcadasPendientesSync = false;
+  clearTimeout(_timerEnvioMarcadas);
+  _ultimoEnvioMarcadas = 0;
+  clearTimeout(reclamoLineaTimer);
+  clearTimeout(reclamoBingoTimer);
+  reclamoLineaPendiente = false;
+  reclamoBingoPendiente = false;
+  borrarSesionJugador();
+  Object.assign(estado, {
+    nombre: nombrePrevio,
+    carton: [],
+    cantadas: new Set(),
+    marcadas: new Set(),
+    recibimoLinea: false,
+    recibimoBingo: false,
+    enPartida: false,
+    partidaId: 0,
+  });
+  delete estado.pendienteCarton;
+  reclamacionesHabilitadas = false;
+  umbralReclamo = 0;
+  penalizadoLinea = false;
+  penalizadoBingo = false;
+  clearTimeout(penTimerLinea);
+  clearTimeout(penTimerBingo);
+  desbloquearTodo();
+  actualizarEstadoVisualBotones();
+
+  if (cartonEl) cartonEl.innerHTML = '';
+  if (pantallaReglas) pantallaReglas.style.display = 'none';
+  if (pantallaJuego) pantallaJuego.style.display = 'none';
+  if (msgEspera) msgEspera.style.display = 'none';
+  if (bannerAnuncio) bannerAnuncio.style.display = 'none';
+  if (mostrarLogin && pantallaLogin) pantallaLogin.style.display = 'flex';
+
+  const inputDiscord = document.getElementById('input-discord');
+  if (inputDiscord && nombrePrevio && !inputDiscord.value.trim()) {
+    inputDiscord.value = nombrePrevio;
+  }
+  if (nombreDisplay) nombreDisplay.textContent = nombrePrevio;
+
+  if (mensaje) mostrarNotif(mensaje, tipo, duracion);
+}
+
 // frases que tienen imagen asociada en /media/casillas/
 let CASILLAS_IMG = {};
 
   // Cargamos las imágenes dinámicamente desde el archivo de configuración JSON
-  fetch('/api/casillas')
+  fetch('/api/casillas', { cache: 'no-store' })
     .then(r => r.json())
     .then(data => {
       // Le inyectamos la ruta para que HTML la resuelva
@@ -318,17 +393,28 @@ function validarTwitchParaRecuperacion() {
   if (!_restauracionLocalPendiente || twitchUser || _validandoTwitchParaRecuperacion) return;
   _validandoTwitchParaRecuperacion = true;
 
-  fetch('/auth/me')
+  fetch('/auth/me', { cache: 'no-store', credentials: 'same-origin' })
     .then(response => {
       if (!response.ok) throw new Error(`HTTP ${response.status} al validar Twitch`);
       return response.json();
     })
     .then(user => {
       if (!user || !user.login) {
-        mostrarNotif('Inicia sesión con Twitch para reconectar. Tus marcas siguen guardadas en este dispositivo.', 'error', 0);
+        window.location.href = '/auth/twitch';
         return;
       }
+      const loginActual = user.login.toLowerCase();
       twitchUser = user;
+      if (sesionJugadorGuardada && sesionJugadorGuardada.twitch && sesionJugadorGuardada.twitch !== loginActual) {
+        resetearEstadoPartidaLocal({
+          mantenerNombre: false,
+          mostrarLogin: true,
+          mensaje: 'La sesión de Twitch cambió. Entra de nuevo para recibir tu cartón.',
+          tipo: 'info',
+          duracion: 5000,
+        });
+        return;
+      }
       emitirUnionJugador();
     })
     .catch(error => {
@@ -345,8 +431,11 @@ function validarTwitchParaRecuperacion() {
   const errorCode = params.get('twitch_error');
   const loadingEl = document.getElementById('twitch-loading');
 
-  fetch('/auth/me')
-    .then(r => r.json())
+  fetch('/auth/me', { cache: 'no-store', credentials: 'same-origin' })
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
     .then(user => {
       if (loadingEl) loadingEl.style.display = 'none';
 
@@ -366,14 +455,27 @@ function validarTwitchParaRecuperacion() {
             loadingEl.style.display = 'block';
           }
           history.replaceState({}, '', '/');
-      // sin sesión → a Twitch
-          window.location.href = '/auth/twitch';
+          return;
         }
+        // sin sesión → a Twitch
+        window.location.href = '/auth/twitch';
         return;
       }
 
+      const loginActual = user.login.toLowerCase();
       twitchUser = user;
       history.replaceState({}, '', '/'); // quito los query params si los hay
+
+      if (_restauracionLocalPendiente && sesionJugadorGuardada &&
+          sesionJugadorGuardada.twitch && sesionJugadorGuardada.twitch !== loginActual) {
+        resetearEstadoPartidaLocal({
+          mantenerNombre: false,
+          mostrarLogin: true,
+          mensaje: 'La sesión de Twitch cambió. Entra de nuevo para recibir tu cartón.',
+          tipo: 'info',
+          duracion: 5000,
+        });
+      }
 
       // Mostrar tarjeta de perfil Twitch
       const cardEl    = document.getElementById('twitch-card');
@@ -389,6 +491,10 @@ function validarTwitchParaRecuperacion() {
       // Mostrar campo Discord y botón entrar
       const discordStep = document.getElementById('discord-step');
       if (discordStep) discordStep.style.display = 'flex';
+      const inputDiscord = document.getElementById('input-discord');
+      if (inputDiscord && estado.nombre && !inputDiscord.value.trim()) {
+        inputDiscord.value = estado.nombre;
+      }
       if (btnEntrar) btnEntrar.style.display = 'block';
 
       if (_restauracionLocalPendiente) emitirUnionJugador();
@@ -451,7 +557,8 @@ document.getElementById('btn-aceptar-reglas')?.addEventListener('click', () => {
   // En este punto ya tenemos el cartón del servidor,
   // así que pasamos directamente a la pantalla de juego
   if (estado.pendienteCarton) {
-    const { carton, cantadas, marcadas } = estado.pendienteCarton;
+    const { carton, cantadas, marcadas, partidaId } = estado.pendienteCarton;
+    if (Number.isFinite(partidaId)) estado.partidaId = partidaId;
     delete estado.pendienteCarton;
     pasarAPantallaJuego(carton, cantadas, marcadas);
   }
@@ -560,6 +667,7 @@ socket.on('connect', () => {
 
 socket.on('disconnect', () => {
   _socketRegistrado = false;
+  _unionSocketId = null;
   clearTimeout(_timerEnvioMarcadas);
   if (estado.enPartida) _marcadasPendientesSync = true;
   guardarSesionJugador();
@@ -571,26 +679,67 @@ socket.on('disconnect', () => {
   mostrarNotif('Desconectado del servidor. Reconectando…', 'error', 0);
 });
 
+socket.on('servidor:estado-partida', ({ partidaActiva, partidaId } = {}) => {
+  if (!estado.enPartida && !_restauracionLocalPendiente) return;
+  const idServidor = Number.isFinite(partidaId) && partidaId > 0 ? partidaId : 0;
+  if (!partidaActiva) {
+    resetearEstadoPartidaLocal({
+      mantenerNombre: true,
+      mostrarLogin: true,
+      mensaje: 'No hay ninguna partida activa. Espera al gestor.',
+      tipo: 'info',
+      duracion: 5000,
+    });
+    return;
+  }
+  if (idServidor > 0 && estado.partidaId > 0 && estado.partidaId !== idServidor) {
+    resetearEstadoPartidaLocal({
+      mantenerNombre: true,
+      mostrarLogin: true,
+      mensaje: 'Se ha iniciado una nueva partida. Pulsa "Entrar al juego" para recibir tu nuevo cartón.',
+      tipo: 'info',
+      duracion: 6000,
+    });
+  }
+});
+
 // el servidor asigna o restaura el cartón cuando el jugador se registra
-socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas: habilitadas, umbralReclamo: umbral }) => {
-  const mismaPartida = mismasTarjetas(estado.carton, carton);
+socket.on('tu:carton', ({ partidaId, carton, cantadas, marcadas, lineaGanada, bingoGanado, reclamacionesHabilitadas: habilitadas, umbralReclamo: umbral }) => {
+  const idRecibido = Number.isFinite(partidaId) && partidaId > 0 ? partidaId : 0;
+  const coincidePorId = !(estado.partidaId > 0 && idRecibido > 0 && estado.partidaId !== idRecibido);
+  const mismaPartida = coincidePorId && mismasTarjetas(estado.carton, carton);
   const reconexionEnEstaPagina = _jugadorUnido && estado.enPartida && mismaPartida;
+  const coincideIdLocal = !(sesionJugadorGuardada && sesionJugadorGuardada.partidaId > 0 && idRecibido > 0 && sesionJugadorGuardada.partidaId !== idRecibido);
   const restauracionLocal = _restauracionLocalPendiente &&
+    Boolean(sesionJugadorGuardada) &&
+    coincideIdLocal &&
     mismasTarjetas(sesionJugadorGuardada.carton, carton);
   const marcadasLocales = Array.from(estado.marcadas);
   const restaurarMarcadasLocales = reconexionEnEstaPagina || restauracionLocal;
   const marcadasRestauradas = restaurarMarcadasLocales ? marcadasLocales : (marcadas || []);
+
+  if (!mismaPartida && !restauracionLocal) {
+    estado.recibimoLinea = false;
+    estado.recibimoBingo = false;
+    penalizadoLinea = false;
+    penalizadoBingo = false;
+    clearTimeout(penTimerLinea);
+    clearTimeout(penTimerBingo);
+    desbloquearTodo();
+    if (bannerAnuncio) bannerAnuncio.style.display = 'none';
+  }
 
   _jugadorUnido = true;
   _unionSolicitada = false;
   _unionSocketId = socket.id;
   _socketRegistrado = true;
   _restauracionLocalPendiente = false;
+  _marcadasPendientesSync = false;
   reclamacionesHabilitadas = habilitadas || false;
   umbralReclamo            = umbral ?? 0;
+  estado.partidaId = idRecibido;
   estado.carton = carton;
   estado.marcadas = new Set(marcadasRestauradas);
-  guardarSesionJugador();
 
   const esReconexion = marcadasRestauradas.length > 0;
   if (reconexionEnEstaPagina || restauracionLocal || esReconexion) {
@@ -598,9 +747,14 @@ socket.on('tu:carton', ({ carton, cantadas, marcadas, lineaGanada, bingoGanado, 
     mostrarNotif('Reconectado. Tu cartón fue restaurado.', 'ok');
   } else {
     // Primera vez: mostrar pantalla de reglas
-    estado.pendienteCarton = { carton, cantadas, marcadas };
-    pantallaLogin.style.display  = 'none';
-    pantallaReglas.style.display = 'flex';
+    estado.cantadas = new Set(cantadas || []);
+    estado.enPartida = false;
+    estado.pendienteCarton = { carton, cantadas, marcadas, partidaId: idRecibido };
+    if (cartonEl) cartonEl.innerHTML = '';
+    if (pantallaJuego) pantallaJuego.style.display = 'none';
+    if (pantallaLogin) pantallaLogin.style.display = 'none';
+    if (pantallaReglas) pantallaReglas.style.display = 'flex';
+    guardarSesionJugador();
     mostrarNotif('Cartón asignado. Lee las reglas y pulsa continuar.', 'ok');
   }
 
@@ -724,11 +878,30 @@ socket.on('partida:reclamaciones-deshabilitadas', () => {
 });
 
 
-socket.on('partida:error', ({ msg }) => {
+socket.on('partida:error', ({ msg, code } = {}) => {
   clearTimeout(reclamoLineaTimer);
   clearTimeout(reclamoBingoTimer);
   reclamoLineaPendiente = false;
   reclamoBingoPendiente = false;
+  if (!_socketRegistrado) {
+    _unionSocketId = null;
+    _unionSolicitada = false;
+  }
+  if (code === 'SIN_TWITCH') {
+    twitchUser = null;
+    window.location.href = '/auth/twitch';
+    return;
+  }
+  if ((code === 'NO_PARTIDA' || code === 'PARTIDA_TERMINADA') && (_restauracionLocalPendiente || !_socketRegistrado)) {
+    resetearEstadoPartidaLocal({
+      mantenerNombre: true,
+      mostrarLogin: true,
+      mensaje: msg,
+      tipo: 'error',
+      duracion: 5000,
+    });
+    return;
+  }
   mostrarNotif(msg, 'error');
 });
 
@@ -744,40 +917,132 @@ socket.on('tu:bloqueado', ({ segs, msg }) => {
 
 // nueva partida → resetear todo y volver al login
 socket.on('partida:nueva', () => {
-  _jugadorUnido = false;
-  _unionSolicitada = false;
-  _unionSocketId = null;
-  _socketRegistrado = false;
-  _restauracionLocalPendiente = false;
-  _marcadasPendientesSync = false;
-  clearTimeout(_timerEnvioMarcadas);
-  _ultimoEnvioMarcadas = 0;
-  borrarSesionJugador();
-  Object.assign(estado, {
-    nombre: '',
-    carton: [],
-    cantadas: new Set(),
-    marcadas: new Set(),
-    recibimoLinea: false,
-    recibimoBingo: false,
-    enPartida: false,
+  resetearEstadoPartidaLocal({
+    mantenerNombre: true,
+    mostrarLogin: true,
+    mensaje: 'El gestor ha iniciado una nueva partida. Vuelve a entrar.',
+    tipo: 'info',
+    duracion: 5000,
   });
-  reclamacionesHabilitadas = false;
-  umbralReclamo            = 0;
-  penalizadoLinea = false;
-  penalizadoBingo = false;
-  clearTimeout(penTimerLinea);
-  clearTimeout(penTimerBingo);
-  desbloquearTodo();
-
-  // Volver a la pantalla de login
-  pantallaJuego.style.display = 'none';
-  pantallaLogin.style.display = 'flex';
-  msgEspera.style.display     = 'none';
-  bannerAnuncio.style.display = 'none';
-
-  mostrarNotif('El gestor ha iniciado una nueva partida. Vuelve a entrar.', 'info', 5000);
 });
+
+function verificarSincronizacionAlVolver(forzar = false) {
+  if (!estado.enPartida && !_restauracionLocalPendiente && !_jugadorUnido) {
+    if (forzar && !twitchUser) {
+      fetch('/auth/me', { cache: 'no-store', credentials: 'same-origin' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(user => {
+          if (!user || !user.login) window.location.href = '/auth/twitch';
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+  if (!navigator.onLine) {
+    mostrarNotif('Sin conexión. Tus marcas se guardan en este dispositivo y se sincronizarán al volver la red.', 'error', 0);
+    return;
+  }
+  if (_restauracionLocalPendiente && !twitchUser) {
+    validarTwitchParaRecuperacion();
+    return;
+  }
+  if (!socket.connected) {
+    _marcadasPendientesSync = true;
+    guardarSesionJugador();
+    mostrarNotif('Conexión interrumpida. Reconectando y guardando tus marcas…', 'error', 0);
+    socket.connect();
+    return;
+  }
+  if (!_socketRegistrado) {
+    _unionSocketId = null;
+    emitirUnionJugador();
+    return;
+  }
+
+  const tiempoOculto = _ocultoDesdeTs > 0 ? (Date.now() - _ocultoDesdeTs) : 0;
+  if (!forzar && _ocultoDesdeTs > 0 && tiempoOculto < 3000) {
+    _ocultoDesdeTs = 0;
+    return;
+  }
+  _ocultoDesdeTs = 0;
+  if (_probeEnCurso) return;
+  _probeEnCurso = true;
+
+  let resuelto = false;
+  const timeoutId = setTimeout(() => {
+    if (resuelto) return;
+    resuelto = true;
+    _probeEnCurso = false;
+    _socketRegistrado = false;
+    _unionSocketId = null;
+    _marcadasPendientesSync = true;
+    guardarSesionJugador();
+    mostrarNotif('Conexión interrumpida en segundo plano. Reconectando…', 'info', 0);
+    socket.disconnect();
+    socket.connect();
+  }, PING_ESTADO_TIMEOUT_MS);
+
+  socket.emit('jugador:ping-estado', {}, (resp) => {
+    if (resuelto) return;
+    resuelto = true;
+    clearTimeout(timeoutId);
+    _probeEnCurso = false;
+
+    if (!resp || !resp.sesionValida) {
+      window.location.href = '/auth/twitch';
+      return;
+    }
+    if (!resp.partidaActiva) {
+      resetearEstadoPartidaLocal({
+        mantenerNombre: true,
+        mostrarLogin: true,
+        mensaje: 'No hay ninguna partida activa. Espera al gestor.',
+        tipo: 'info',
+        duracion: 5000,
+      });
+      return;
+    }
+    if (resp.partidaId > 0 && estado.partidaId > 0 && resp.partidaId !== estado.partidaId) {
+      resetearEstadoPartidaLocal({
+        mantenerNombre: true,
+        mostrarLogin: true,
+        mensaje: 'Se ha iniciado una nueva partida. Pulsa "Entrar al juego" para recibir tu nuevo cartón.',
+        tipo: 'info',
+        duracion: 6000,
+      });
+      return;
+    }
+    if (!resp.registrado) {
+      _socketRegistrado = false;
+      _unionSocketId = null;
+      _marcadasPendientesSync = true;
+      emitirUnionJugador();
+      return;
+    }
+
+    if (resp.partidaId > 0) estado.partidaId = resp.partidaId;
+    if (Array.isArray(resp.cantadas)) estado.cantadas = new Set(resp.cantadas);
+    reclamacionesHabilitadas = Boolean(resp.reclamacionesHabilitadas);
+    umbralReclamo = resp.umbralReclamo ?? 0;
+
+    if (resp.carton && !mismasTarjetas(estado.carton, resp.carton)) {
+      estado.carton = resp.carton;
+      estado.marcadas = new Set(resp.marcadas || []);
+      pasarAPantallaJuego(resp.carton, resp.cantadas || [], resp.marcadas || []);
+    } else {
+      actualizarTodasLasCeldas();
+      actualizarBotones();
+      const marcadasLocales = Array.from(estado.marcadas);
+      if (_marcadasPendientesSync || !mismasMarcadas(marcadasLocales, resp.marcadas || [])) {
+        enviarMarcadas();
+      }
+    }
+    if (notificacionEl && notificacionEl.classList.contains('visible') &&
+        /Reconectando|Sin conexión|interrumpida|Recuperando/i.test(notificacionEl.textContent || '')) {
+      notificacionEl.className = '';
+    }
+  });
+}
 
 window.addEventListener('offline', () => {
   if (!estado.enPartida) return;
@@ -788,7 +1053,7 @@ window.addEventListener('offline', () => {
 });
 
 window.addEventListener('online', () => {
-  if (!estado.enPartida) return;
+  if (!estado.enPartida && !_restauracionLocalPendiente && !_jugadorUnido) return;
   if (_restauracionLocalPendiente && !twitchUser) {
     validarTwitchParaRecuperacion();
     return;
@@ -799,41 +1064,32 @@ window.addEventListener('online', () => {
     return;
   }
   if (!_socketRegistrado) {
+    _unionSocketId = null;
     emitirUnionJugador();
     return;
   }
   notificacionEl.className = '';
   actualizarBotones();
+  verificarSincronizacionAlVolver(true);
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !estado.enPartida) return;
-  if (_restauracionLocalPendiente && !twitchUser) {
-    validarTwitchParaRecuperacion();
+  if (document.visibilityState === 'hidden') {
+    _ocultoDesdeTs = Date.now();
     return;
   }
-  if (!navigator.onLine) {
-    mostrarNotif('Sin conexión. Tus marcas se guardan en este dispositivo y se sincronizarán al volver la red.', 'error', 0);
-    return;
-  }
-  if (!socket.connected) {
-    _marcadasPendientesSync = true;
-    guardarSesionJugador();
-    mostrarNotif('Conexión interrumpida. Reconectando y guardando tus marcas…', 'error', 0);
-    socket.connect();
-  } else if (!_socketRegistrado) {
-    emitirUnionJugador();
+  if (document.visibilityState === 'visible') {
+    verificarSincronizacionAlVolver(false);
   }
 });
 
-window.addEventListener('pageshow', () => {
-  if (!estado.enPartida || !navigator.onLine) return;
-  if (_restauracionLocalPendiente && !twitchUser) {
-    validarTwitchParaRecuperacion();
-    return;
-  }
-  if (!socket.connected) socket.connect();
-  else if (!_socketRegistrado) emitirUnionJugador();
+window.addEventListener('pagehide', () => {
+  _ocultoDesdeTs = Date.now();
+  if (estado.enPartida) guardarSesionJugador();
+});
+
+window.addEventListener('pageshow', (event) => {
+  verificarSincronizacionAlVolver(Boolean(event && event.persisted));
 });
 
 function restaurarSesionLocal() {

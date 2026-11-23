@@ -19,13 +19,15 @@ let cfg = {
   clientId:      process.env.TWITCH_CLIENT_ID     || '',
   clientSecret:  process.env.TWITCH_CLIENT_SECRET || '',
   baseUrl:       process.env.BASE_URL       || '',  // URL pública del túnel (p.ej. https://xxx.trycloudflare.com)
+  sessionSecret: process.env.SESSION_SECRET || '',
 };
 try {
   const fileCfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
-  if (fileCfg.gestorToken)  cfg.gestorToken  = fileCfg.gestorToken;
-  if (fileCfg.clientId)     cfg.clientId     = fileCfg.clientId;
-  if (fileCfg.clientSecret) cfg.clientSecret = fileCfg.clientSecret;
-  if (fileCfg.baseUrl)      cfg.baseUrl      = fileCfg.baseUrl;
+  if (fileCfg.gestorToken)   cfg.gestorToken   = fileCfg.gestorToken;
+  if (fileCfg.clientId)      cfg.clientId      = fileCfg.clientId;
+  if (fileCfg.clientSecret)  cfg.clientSecret  = fileCfg.clientSecret;
+  if (fileCfg.baseUrl)       cfg.baseUrl       = fileCfg.baseUrl;
+  if (fileCfg.sessionSecret) cfg.sessionSecret = fileCfg.sessionSecret;
 } catch { /* sin config.json, tiro de env vars */ }
 
 if (!cfg.gestorToken) {
@@ -40,6 +42,15 @@ const CARTON_SIZE = CARTON_COLS * CARTON_ROWS;
 const TWITCH_BANS_FILE = process.env.TWITCH_BANS_FILE
   ? path.resolve(process.env.TWITCH_BANS_FILE)
   : path.join(__dirname, 'datos', 'cuentas-baneadas.json');
+const RESULTS_DIR = process.env.RESULTS_DIR
+  ? path.resolve(process.env.RESULTS_DIR)
+  : path.join(__dirname, 'resultados');
+const GAME_STATE_FILE = process.env.GAME_STATE_FILE
+  ? path.resolve(process.env.GAME_STATE_FILE)
+  : path.join(__dirname, 'datos', 'estado-partida.json');
+const GAME_STATE_BAK_FILE = `${GAME_STATE_FILE}.bak`;
+const PERSIST_STATE_ENABLED = process.env.PERSIST_STATE !== '0';
+const GAME_STATE_SCHEMA_VERSION = 1;
 const TWITCH_LOGIN_PATTERN = /^[a-z0-9_]{1,25}$/;
 
 function cargarCuentasBaneadas() {
@@ -103,6 +114,15 @@ function leerEnvInt(nombre, porDefecto, min = 0, max = Number.MAX_SAFE_INTEGER) 
   return Math.max(min, Math.min(max, raw));
 }
 
+const STATE_SAVE_CRITICAL_DEBOUNCE_MS = leerEnvInt('STATE_SAVE_CRITICAL_DEBOUNCE_MS', 150, 0, 5000);
+const STATE_SAVE_BATCH_DEBOUNCE_MS = leerEnvInt('STATE_SAVE_BATCH_DEBOUNCE_MS', 1500, 50, 15000);
+const STATE_SAVE_MAX_WAIT_MS = leerEnvInt('STATE_SAVE_MAX_WAIT_MS', 4000, 100, 30000);
+const TWITCH_SESSION_TTL_SEC = leerEnvInt('TWITCH_SESSION_TTL_SEC', 21600, 300, 86400);
+const TWITCH_SESSION_SECRET = crypto
+  .createHash('sha256')
+  .update(`bingoelus:twitch-session:v1:${cfg.sessionSecret || `${cfg.gestorToken}:${cfg.clientSecret}`}`)
+  .digest();
+
 // ─── Estado del juego ─────────────────────────────────────────
 
 const estado = {
@@ -125,6 +145,363 @@ const estado = {
 const rateLimits = {};
 const rateLimitsBusquedaGestor = {};
 const marcadasPendientesRate = new Map();
+
+// ─── Persistencia atómica del estado de partida ───────────────
+
+const persistMeta = {
+  restauradoAlArrancar: false,
+  origenRestauracion: null,
+  ultimoGuardadoTs: 0,
+  ultimoError: null,
+};
+
+let persistSeq = 0;
+let persistTimer = null;
+let persistWriteInFlight = null;
+let persistDirty = false;
+let persistPendingPriority = 'batch';
+let persistFirstDirtyTs = 0;
+
+function esObjetoPlano(valor) {
+  return Boolean(valor) && typeof valor === 'object' && !Array.isArray(valor);
+}
+
+function esCartonValido(carton) {
+  return Array.isArray(carton) &&
+    carton.length === CARTON_ROWS &&
+    carton.every(fila => Array.isArray(fila) && fila.length === CARTON_COLS && fila.every(f => typeof f === 'string'));
+}
+
+function cartonCoincideConFrases(carton, frases) {
+  if (!esCartonValido(carton) || !Array.isArray(frases) || frases.length < CARTON_SIZE) return false;
+  const frasesSet = new Set(frases);
+  return carton.every(fila => fila.every(frase => frasesSet.has(frase)));
+}
+
+function setNoStoreHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+
+function serializarEstadoPartida() {
+  return {
+    schemaVersion: GAME_STATE_SCHEMA_VERSION,
+    savedAt: Date.now(),
+    frases: estado.frases,
+    cantadas: estado.cantadas,
+    verificadas: estado.verificadas,
+    olvidadas: estado.olvidadas,
+    tokens: estado.tokens,
+    lineaGanada: !!estado.lineaGanada,
+    bingoGanado: !!estado.bingoGanado,
+    partidaActiva: !!estado.partidaActiva,
+    partidaIniciadaTs: estado.partidaIniciadaTs || 0,
+    discordCartonesNotificados: estado.discordCartonesNotificados || {},
+    reclamacionesHabilitadas: !!estado.reclamacionesHabilitadas,
+    umbralReclamo: Number.isFinite(estado.umbralReclamo) ? estado.umbralReclamo : 0,
+  };
+}
+
+function validarYNormalizarSnapshot(raw) {
+  if (!esObjetoPlano(raw)) {
+    throw new Error('El snapshot de estado no es un objeto JSON válido.');
+  }
+  if (!Array.isArray(raw.frases) || !raw.frases.every(f => typeof f === 'string')) {
+    throw new Error('El campo frases del snapshot es inválido.');
+  }
+  if (!esObjetoPlano(raw.tokens)) {
+    throw new Error('El campo tokens del snapshot es inválido.');
+  }
+
+  const filtrarStrings = (arr) => (Array.isArray(arr) ? arr.filter(f => typeof f === 'string') : []);
+  const tokens = {};
+  for (const [login, datos] of Object.entries(raw.tokens)) {
+    if (!login || !esObjetoPlano(datos) || !esCartonValido(datos.carton)) {
+      throw new Error(`Entrada de jugador inválida en snapshot para "${login}".`);
+    }
+    const cartonSet = new Set(datos.carton.flat());
+    const marcadas = Array.isArray(datos.marcadas)
+      ? [...new Set(datos.marcadas.filter(f => typeof f === 'string' && cartonSet.has(f)))].slice(0, CARTON_SIZE)
+      : [];
+    tokens[login] = {
+      carton: datos.carton.map(fila => [...fila]),
+      marcadas,
+      cantadoLinea: !!datos.cantadoLinea,
+      cantadoBingo: !!datos.cantadoBingo,
+      nombre: typeof datos.nombre === 'string' && datos.nombre.trim()
+        ? datos.nombre.trim().slice(0, 24)
+        : login.slice(0, 24),
+      twitchVerified: !!datos.twitchVerified,
+    };
+  }
+
+  const discordCartonesNotificados = {};
+  if (esObjetoPlano(raw.discordCartonesNotificados)) {
+    for (const [clave, ts] of Object.entries(raw.discordCartonesNotificados)) {
+      if (typeof clave === 'string' && Number.isFinite(ts)) {
+        discordCartonesNotificados[clave] = ts;
+      }
+    }
+  }
+
+  return {
+    schemaVersion: Number.isFinite(raw.schemaVersion) ? raw.schemaVersion : GAME_STATE_SCHEMA_VERSION,
+    savedAt: Number.isFinite(raw.savedAt) ? raw.savedAt : 0,
+    frases: [...raw.frases],
+    cantadas: filtrarStrings(raw.cantadas),
+    verificadas: filtrarStrings(raw.verificadas),
+    olvidadas: filtrarStrings(raw.olvidadas),
+    tokens,
+    lineaGanada: !!raw.lineaGanada,
+    bingoGanado: !!raw.bingoGanado,
+    partidaActiva: !!raw.partidaActiva,
+    partidaIniciadaTs: Number.isFinite(raw.partidaIniciadaTs) && raw.partidaIniciadaTs >= 0 ? raw.partidaIniciadaTs : 0,
+    discordCartonesNotificados,
+    reclamacionesHabilitadas: !!raw.reclamacionesHabilitadas,
+    umbralReclamo: Number.isFinite(raw.umbralReclamo)
+      ? Math.max(0, Math.min(CARTON_SIZE, Math.trunc(raw.umbralReclamo)))
+      : 0,
+  };
+}
+
+function leerSnapshotDesdeArchivo(ruta) {
+  let contenido;
+  try {
+    contenido = fs.readFileSync(ruta, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return { ok: false, missing: true };
+    return { ok: false, error: err };
+  }
+  try {
+    const parsed = JSON.parse(contenido);
+    return { ok: true, data: validarYNormalizarSnapshot(parsed) };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
+async function renombrarConReintentoAsync(src, dest) {
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      await fs.promises.rename(src, dest);
+      return;
+    } catch (err) {
+      if ((err.code === 'EPERM' || err.code === 'EBUSY') && intento < 2) {
+        await new Promise(r => setTimeout(r, 15 * (intento + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+function renombrarConReintentoSync(src, dest) {
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (err) {
+      if ((err.code === 'EPERM' || err.code === 'EBUSY') && intento < 2) continue;
+      throw err;
+    }
+  }
+}
+
+async function escribirEstadoPartidaAsync(json, savedAt) {
+  const dir = path.dirname(GAME_STATE_FILE);
+  await fs.promises.mkdir(dir, { recursive: true });
+
+  const temporal = `${GAME_STATE_FILE}.${process.pid}.${++persistSeq}.tmp`;
+  const bakTemporal = `${GAME_STATE_BAK_FILE}.${process.pid}.${persistSeq}.tmp`;
+
+  try {
+    const fh = await fs.promises.open(temporal, 'w', 0o600);
+    try {
+      await fh.writeFile(json, 'utf8');
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+
+    try {
+      await fs.promises.copyFile(GAME_STATE_FILE, bakTemporal);
+      await renombrarConReintentoAsync(bakTemporal, GAME_STATE_BAK_FILE);
+    } catch (bakErr) {
+      if (bakErr.code !== 'ENOENT') {
+        console.warn('[Servidor] No se pudo actualizar el respaldo .bak del estado:', bakErr.message);
+      }
+      try { await fs.promises.unlink(bakTemporal); } catch { /* noop */ }
+    }
+
+    await renombrarConReintentoAsync(temporal, GAME_STATE_FILE);
+    persistMeta.ultimoGuardadoTs = savedAt;
+    persistMeta.ultimoError = null;
+  } catch (err) {
+    try { await fs.promises.unlink(temporal); } catch { /* noop */ }
+    throw err;
+  }
+}
+
+function guardarEstadoPartidaSync() {
+  if (!PERSIST_STATE_ENABLED) return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  persistDirty = false;
+  persistPendingPriority = 'batch';
+  persistFirstDirtyTs = 0;
+
+  const dir = path.dirname(GAME_STATE_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const snapshot = serializarEstadoPartida();
+  const json = `${JSON.stringify(snapshot)}\n`;
+  const temporal = `${GAME_STATE_FILE}.${process.pid}.${++persistSeq}.sync.tmp`;
+  const bakTemporal = `${GAME_STATE_BAK_FILE}.${process.pid}.${persistSeq}.sync.tmp`;
+
+  try {
+    const fd = fs.openSync(temporal, 'w', 0o600);
+    try {
+      fs.writeSync(fd, json, 0, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    try {
+      fs.copyFileSync(GAME_STATE_FILE, bakTemporal);
+      renombrarConReintentoSync(bakTemporal, GAME_STATE_BAK_FILE);
+    } catch (bakErr) {
+      if (bakErr.code !== 'ENOENT') {
+        console.warn('[Servidor] No se pudo actualizar el respaldo .bak síncrono:', bakErr.message);
+      }
+      try { fs.unlinkSync(bakTemporal); } catch { /* noop */ }
+    }
+
+    renombrarConReintentoSync(temporal, GAME_STATE_FILE);
+    persistMeta.ultimoGuardadoTs = snapshot.savedAt;
+    persistMeta.ultimoError = null;
+  } catch (err) {
+    persistMeta.ultimoError = err.message;
+    try { fs.unlinkSync(temporal); } catch { /* noop */ }
+    console.error('[Servidor] Error en guardado síncrono del estado:', err.message);
+  }
+}
+
+function ejecutarCicloGuardado() {
+  if (!PERSIST_STATE_ENABLED || persistWriteInFlight || !persistDirty) return;
+  persistDirty = false;
+  persistPendingPriority = 'batch';
+  persistFirstDirtyTs = 0;
+
+  const snapshot = serializarEstadoPartida();
+  const json = `${JSON.stringify(snapshot)}\n`;
+
+  persistWriteInFlight = escribirEstadoPartidaAsync(json, snapshot.savedAt)
+    .catch((err) => {
+      persistMeta.ultimoError = err.message;
+      console.error('[Servidor] Error guardando estado de partida:', err.message);
+    })
+    .finally(() => {
+      persistWriteInFlight = null;
+      if (persistDirty && !persistTimer) {
+        programarGuardadoEstado(persistPendingPriority);
+      }
+    });
+}
+
+function programarGuardadoEstado(prioridad = 'batch') {
+  if (!PERSIST_STATE_ENABLED) return;
+  const ahora = Date.now();
+  persistDirty = true;
+  if (!persistFirstDirtyTs) persistFirstDirtyTs = ahora;
+  if (prioridad === 'critical') persistPendingPriority = 'critical';
+
+  if (persistWriteInFlight) return;
+
+  const delay = persistPendingPriority === 'critical'
+    ? STATE_SAVE_CRITICAL_DEBOUNCE_MS
+    : Math.min(STATE_SAVE_BATCH_DEBOUNCE_MS, Math.max(0, STATE_SAVE_MAX_WAIT_MS - (ahora - persistFirstDirtyTs)));
+
+  if (persistTimer) {
+    if (prioridad !== 'critical' && delay > 0) return;
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    ejecutarCicloGuardado();
+  }, delay);
+}
+
+function cargarEstadoPartida() {
+  if (!PERSIST_STATE_ENABLED) return false;
+  fs.mkdirSync(path.dirname(GAME_STATE_FILE), { recursive: true });
+
+  let resultado = leerSnapshotDesdeArchivo(GAME_STATE_FILE);
+  let origen = GAME_STATE_FILE;
+
+  if (!resultado.ok) {
+    if (resultado.error) {
+      console.error(`[Servidor] Snapshot principal inválido (${GAME_STATE_FILE}): ${resultado.error.message}. Probando respaldo .bak...`);
+    }
+    const respaldo = leerSnapshotDesdeArchivo(GAME_STATE_BAK_FILE);
+    if (!respaldo.ok) {
+      if (respaldo.error) {
+        persistMeta.ultimoError = respaldo.error.message;
+        console.error(`[Servidor] Respaldo .bak inválido (${GAME_STATE_BAK_FILE}): ${respaldo.error.message}`);
+      }
+      return false;
+    }
+    resultado = respaldo;
+    origen = GAME_STATE_BAK_FILE;
+  }
+
+  const data = resultado.data;
+  estado.frases = data.frases;
+  estado.cantadas = data.cantadas;
+  estado.verificadas = data.verificadas;
+  estado.olvidadas = data.olvidadas;
+  estado.jugadores = {};
+  estado.tokens = data.tokens;
+  estado.ips = {};
+  estado.lineaGanada = data.lineaGanada;
+  estado.bingoGanado = data.bingoGanado;
+  estado.partidaActiva = data.partidaActiva;
+  estado.partidaIniciadaTs = data.partidaIniciadaTs;
+  estado.discordCartonesNotificados = data.discordCartonesNotificados;
+  estado.reclamacionesHabilitadas = data.reclamacionesHabilitadas;
+  estado.umbralReclamo = data.umbralReclamo;
+
+  persistMeta.restauradoAlArrancar = true;
+  persistMeta.origenRestauracion = origen;
+  persistMeta.ultimoGuardadoTs = data.savedAt || 0;
+  persistMeta.ultimoError = null;
+
+  if (origen === GAME_STATE_BAK_FILE) {
+    // Repara el snapshot principal desde el respaldo antes de futuras rotaciones .bak.
+    const tmp = `${GAME_STATE_FILE}.${process.pid}.repair.tmp`;
+    try {
+      fs.copyFileSync(GAME_STATE_BAK_FILE, tmp);
+      renombrarConReintentoSync(tmp, GAME_STATE_FILE);
+    } catch (repairErr) {
+      try { fs.unlinkSync(tmp); } catch { /* noop */ }
+      console.warn('[Servidor] No se pudo reparar el snapshot principal desde .bak:', repairErr.message);
+    }
+  }
+
+  console.log(
+    `[Servidor] Estado de partida restaurado desde ${origen} ` +
+    `(activa=${estado.partidaActiva}, frases=${estado.frases.length}, ` +
+    `cantadas=${estado.cantadas.length}, jugadores=${Object.keys(estado.tokens).length}).`
+  );
+  return true;
+}
+
+cargarEstadoPartida();
 
 const RATE_LIMIT_RECLAMO_INVALIDO_MS = 1200;
 const RATE_MARCADAS_BASE_MS = leerEnvInt('RATE_MARCADAS_BASE_MS', 120, 40, 2000);
@@ -162,7 +539,8 @@ const DISCORD_MAX_FILE_BYTES = Math.max(256 * 1024, parseInt(process.env.DISCORD
 let gestorBroadcastTimer = null;
 function scheduledGestorBroadcast() {
   if (gestorBroadcastTimer) return;
-  const delay = Object.keys(estado.jugadores).length > 500 ? 2000 : 300;
+  const online = Object.keys(estado.jugadores).length;
+  const delay = online > 500 ? 2000 : (online > GESTOR_FULL_THRESHOLD ? 1200 : 300);
   gestorBroadcastTimer = setTimeout(() => {
     gestorBroadcastTimer = null;
     nsGestor.emit('partida:jugador-unido', resumenJugadores());
@@ -283,6 +661,7 @@ function aplicarSnapshotMarcadas(jugador, marcadas) {
     .slice(0, 25);
   if (estado.tokens[jugador.twitch]) {
     estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
+    programarGuardadoEstado('batch');
   }
 }
 
@@ -331,6 +710,77 @@ function aplicarMarcadasJugador(socket, jugador, marcadas) {
 
 const twitchStates   = new Map();
 const twitchSessions = new Map();
+const revokedTwitchSessions = new Map(); // sig → expMs
+
+function crearTokenSesionTwitch(usuario, ttlSeg = TWITCH_SESSION_TTL_SEC) {
+  const ahoraSeg = Math.floor(Date.now() / 1000);
+  const payload = {
+    login: String(usuario?.login || ''),
+    displayName: String(usuario?.displayName || usuario?.login || ''),
+    exp: ahoraSeg + ttlSeg,
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', TWITCH_SESSION_SECRET)
+    .update(payloadB64)
+    .digest('base64url');
+  return `v1.${payloadB64}.${sig}`;
+}
+
+function verificarTokenSesionTwitch(token) {
+  if (typeof token !== 'string' || !token.startsWith('v1.')) return null;
+  const partes = token.split('.');
+  if (partes.length !== 3 || !partes[1] || !partes[2]) return null;
+  const [, payloadB64, sig] = partes;
+  const revExp = revokedTwitchSessions.get(sig);
+  if (revExp && revExp > Date.now()) return null;
+
+  const esperado = crypto
+    .createHmac('sha256', TWITCH_SESSION_SECRET)
+    .update(payloadB64)
+    .digest('base64url');
+  const sigBuf = Buffer.from(sig, 'utf8');
+  const espBuf = Buffer.from(esperado, 'utf8');
+  if (sigBuf.length !== espBuf.length || !crypto.timingSafeEqual(sigBuf, espBuf)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (!esObjetoPlano(payload) || typeof payload.login !== 'string' || !payload.login) return null;
+    if (!Number.isFinite(payload.exp) || payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    return {
+      login: payload.login,
+      displayName: typeof payload.displayName === 'string' && payload.displayName ? payload.displayName : payload.login,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function obtenerSesionTwitch(sid) {
+  if (!sid || typeof sid !== 'string') return null;
+  const tokenSession = verificarTokenSesionTwitch(sid);
+  if (tokenSession) return tokenSession;
+  return twitchSessions.get(sid) || null;
+}
+
+function revocarSesionTwitch(sid) {
+  if (!sid || typeof sid !== 'string') return;
+  twitchSessions.delete(sid);
+  if (sid.startsWith('v1.')) {
+    const partes = sid.split('.');
+    if (partes.length === 3 && partes[2] && verificarTokenSesionTwitch(sid)) {
+      try {
+        const payload = JSON.parse(Buffer.from(partes[1], 'base64url').toString('utf8'));
+        const expMs = Number.isFinite(payload?.exp) ? payload.exp * 1000 : Date.now() + TWITCH_SESSION_TTL_SEC * 1000;
+        revokedTwitchSessions.set(partes[2], expMs);
+      } catch {
+        revokedTwitchSessions.set(partes[2], Date.now() + TWITCH_SESSION_TTL_SEC * 1000);
+      }
+    }
+  }
+}
 
 // Cola de tickets estricta para no disparar el WAF de Twitch
 const authQueue = [];
@@ -343,15 +793,18 @@ setInterval(() => {
   for (const [t, info] of ticketResult) {
     if (ahora - (info.ts || 0) > 900_000) ticketResult.delete(t);
   }
-}, 300_000);
+}, 300_000).unref();
 
-// Limpieza periódica de estados huérfanos cada minuto en lugar de en cada petición
+// Limpieza periódica de estados y revocaciones expiradas cada minuto
 setInterval(() => {
   const ahora = Date.now();
   for (const [s, t] of twitchStates) {
     if (ahora - t > 600_000) twitchStates.delete(s);
   }
-}, 60000);
+  for (const [sig, expMs] of revokedTwitchSessions) {
+    if (expMs <= ahora) revokedTwitchSessions.delete(sig);
+  }
+}, 60000).unref();
 
 function parseCookies(str) {
   const out = {};
@@ -442,14 +895,54 @@ function resolverJugadorGestor(socketId) {
   return null;
 }
 
-function sincronizarGanadorEnTokens(resuelto, campo) {
-  const twitchLogin = resuelto.twitchLogin;
-  if (!twitchLogin || !estado.tokens[twitchLogin]) return;
-  if (resuelto.online) {
-    estado.tokens[twitchLogin][campo] = estado.jugadores[resuelto.socketId][campo];
-  } else if (resuelto.datosToken) {
-    estado.tokens[twitchLogin][campo] = resuelto.datosToken[campo];
+function marcarGanadorPersistente(twitchLogin, campo) {
+  if (!twitchLogin) return;
+  if (estado.tokens[twitchLogin]) {
+    estado.tokens[twitchLogin][campo] = true;
   }
+  for (const jugadorActivo of Object.values(estado.jugadores)) {
+    if (jugadorActivo.twitch === twitchLogin) {
+      jugadorActivo[campo] = true;
+    }
+  }
+}
+
+function formatearGanador(participante) {
+  const nombre = participante.nombre || participante.twitch || 'Sin nombre';
+  return participante.twitch ? `${nombre} (@${participante.twitch})` : nombre;
+}
+
+function recopilarParticipantesPartida() {
+  const participantes = new Map();
+
+  for (const [login, datos] of Object.entries(estado.tokens)) {
+    if (!datos) continue;
+    participantes.set(login, {
+      nombre: datos.nombre || login,
+      twitch: login,
+      cantadoLinea: !!datos.cantadoLinea,
+      cantadoBingo: !!datos.cantadoBingo,
+    });
+  }
+
+  for (const jugador of Object.values(estado.jugadores)) {
+    const clave = jugador.twitch || `socket:${jugador.socketId}`;
+    const existente = participantes.get(clave);
+    if (existente) {
+      existente.nombre = jugador.nombre || existente.nombre;
+      existente.cantadoLinea = existente.cantadoLinea || !!jugador.cantadoLinea;
+      existente.cantadoBingo = existente.cantadoBingo || !!jugador.cantadoBingo;
+    } else {
+      participantes.set(clave, {
+        nombre: jugador.nombre || jugador.twitch || 'Sin nombre',
+        twitch: jugador.twitch || '',
+        cantadoLinea: !!jugador.cantadoLinea,
+        cantadoBingo: !!jugador.cantadoBingo,
+      });
+    }
+  }
+
+  return [...participantes.values()];
 }
 
 function declararLineaManual(socketId) {
@@ -468,10 +961,11 @@ function declararLineaManual(socketId) {
     resuelto.datosToken.cantadoLinea = true;
     jugador.cantadoLinea = true;
   }
-  sincronizarGanadorEnTokens(resuelto, 'cantadoLinea');
+  marcarGanadorPersistente(resuelto.twitchLogin, 'cantadoLinea');
 
   estado.lineaGanada = true;
   estado.reclamacionesHabilitadas = false;
+  programarGuardadoEstado('critical');
 
   const payload = {
     ganador: jugador.nombre,
@@ -509,9 +1003,10 @@ function declararBingoManual(socketId) {
     resuelto.datosToken.cantadoBingo = true;
     jugador.cantadoBingo = true;
   }
-  sincronizarGanadorEnTokens(resuelto, 'cantadoBingo');
+  marcarGanadorPersistente(resuelto.twitchLogin, 'cantadoBingo');
 
   estado.reclamacionesHabilitadas = false;
+  programarGuardadoEstado('critical');
 
   const payload = {
     ganador: jugador.nombre,
@@ -535,7 +1030,7 @@ function declararBingoManual(socketId) {
 
 // guarda un resumen de ganadores en ./resultados/YYYY-MM-DD_HH-MM-SS.txt
 async function guardarResultados(ganadoresLinea, ganadoresBingo) {
-  const dir = path.join(__dirname, 'resultados');
+  const dir = RESULTS_DIR;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const ahora = new Date();
@@ -1009,8 +1504,7 @@ async function processAuthQueue() {
         const user = userData?.data?.[0];
         if (!user) throw new Error('No se obtuvieron datos del usuario');
 
-        const sessionId = crypto.randomBytes(32).toString('hex');
-        twitchSessions.set(sessionId, { login: user.login, displayName: user.display_name });
+        const sessionId = crearTokenSesionTwitch({ login: user.login, displayName: user.display_name });
         console.log(`[Twitch] sesión creada para @${user.login} (Cola restante: ${authQueue.length})`);
 
         ticketResult.set(ticket, { status: 'done', sessionId, ts: Date.now() });
@@ -1029,6 +1523,7 @@ async function processAuthQueue() {
 
 // Endpoint donde la sala de espera consulta si ya entró
 expressApp.get('/auth/twitch/status', (req, res) => {
+  setNoStoreHeaders(res);
   const ticket = req.query.ticket;
   if (!ticket) return res.json({ status: 'error', error: 'estado_invalido' });
   
@@ -1036,8 +1531,14 @@ expressApp.get('/auth/twitch/status', (req, res) => {
   if (!info) return res.json({ status: 'error', error: 'estado_invalido' });
 
   if (info.status === 'done') {
+    const esHttps = Boolean(cfg.baseUrl && cfg.baseUrl.startsWith('https://')) ||
+      req.secure ||
+      req.headers['x-forwarded-proto'] === 'https';
     // Clavamos la cookie válida cuando responde 'done'
-    res.setHeader('Set-Cookie', `twitch_sid=${info.sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`);
+    res.setHeader(
+      'Set-Cookie',
+      `twitch_sid=${info.sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TWITCH_SESSION_TTL_SEC}${esHttps ? '; Secure' : ''}`
+    );
     res.json({ status: 'done' });
   } else if (info.status === 'error') {
     res.json({ status: 'error', error: info.error });
@@ -1051,27 +1552,42 @@ expressApp.get('/auth/twitch/status', (req, res) => {
 });
 
 expressApp.get('/auth/me', (req, res) => {
+  setNoStoreHeaders(res);
   const sid  = parseCookies(req.headers.cookie || '')['twitch_sid'];
-  const data = sid ? twitchSessions.get(sid) : null;
+  const data = obtenerSesionTwitch(sid);
   res.json(data || null);
 });
 
 expressApp.get('/auth/twitch/logout', (req, res) => {
+  setNoStoreHeaders(res);
   const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
-  if (sid) twitchSessions.delete(sid);
-  res.setHeader('Set-Cookie', 'twitch_sid=; Path=/; Max-Age=0');
+  if (sid) revocarSesionTwitch(sid);
+  const esHttps = Boolean(cfg.baseUrl && cfg.baseUrl.startsWith('https://')) ||
+    req.secure ||
+    req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `twitch_sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${esHttps ? '; Secure' : ''}`);
   res.redirect('/');
 });
 
   expressApp.get('/api/casillas', (req, res) => {
+    setNoStoreHeaders(res);
     res.sendFile(require('path').join(__dirname, 'casillas.json'), err => { if(err) res.status(404).json({}); });
   });
 
 expressApp.get(['/moderador', '/moderador.html'], (req, res) => {
+  setNoStoreHeaders(res);
   res.sendFile(path.join(__dirname, 'public', 'moderador.html'));
 });
 
 expressApp.get(['/jugador', '/jugador.html'], (req, res) => {
+  setNoStoreHeaders(res);
+  if (cfg.clientId && !req.query.twitch_error) {
+    const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
+    if (!obtenerSesionTwitch(sid)) {
+      res.redirect('/auth/twitch');
+      return;
+    }
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -1111,6 +1627,12 @@ expressApp.get('/healthz', (_req, res) => {
         busquedasRateLimited: metricas.total.busquedasRateLimited,
         promedioBusquedaMs,
       },
+      persistencia: {
+        habilitada: PERSIST_STATE_ENABLED,
+        restauradoAlArrancar: persistMeta.restauradoAlArrancar,
+        ultimoGuardadoTs: persistMeta.ultimoGuardadoTs,
+        ultimoError: persistMeta.ultimoError,
+      },
       configuracion: {
         onlineMediaThreshold: ONLINE_MEDIA_THRESHOLD,
         onlineAltaThreshold: ONLINE_ALTA_THRESHOLD,
@@ -1128,10 +1650,11 @@ expressApp.get('/healthz', (_req, res) => {
 });
 
 expressApp.get('/', (req, res, next) => {
+  setNoStoreHeaders(res);
   if (!cfg.clientId) return next();
   if (req.query.twitch_error) return next();
   const sid = parseCookies(req.headers.cookie || '')['twitch_sid'];
-  if (sid && twitchSessions.has(sid)) return next();
+  if (obtenerSesionTwitch(sid)) return next();
   res.redirect('/auth/twitch');
 });
 
@@ -1140,6 +1663,11 @@ expressApp.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 0, // Desactivado para forzar recarga
   etag: true,
   lastModified: true,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      setNoStoreHeaders(res);
+    }
+  },
 }));
 expressApp.use('/media', express.static(path.join(__dirname, 'media'), {
   maxAge: '7d',   // las imágenes no cambian durante el directo
@@ -1183,13 +1711,14 @@ nsGestor.on('connection', (socket) => {
     estado.lineaGanada              = false;
     estado.bingoGanado              = false;
     estado.partidaActiva            = true;
-    estado.partidaIniciadaTs        = Date.now();
+    estado.partidaIniciadaTs        = Math.max(Date.now(), (estado.partidaIniciadaTs || 0) + 1);
     estado.discordCartonesNotificados = {};
     limpiarColaMarcadasGestor();
     estado.reclamacionesHabilitadas = false;
     estado.umbralReclamo            = 0;
+    programarGuardadoEstado('critical');
     console.log(`[Servidor] Partida iniciada con ${estado.frases.length} frases.`);
-    nsJugador.emit('partida:nueva');
+    nsJugador.emit('partida:nueva', { partidaId: estado.partidaIniciadaTs, partidaActiva: true });
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
   });
@@ -1276,6 +1805,7 @@ nsGestor.on('connection', (socket) => {
       nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
     }
 
+    programarGuardadoEstado('critical');
     console.log(`[Servidor] Frase descantada: "${frase}". Recalculados ganadores.`);
     nsJugador.emit('partida:frase-descantada', { frase, cantadas: estado.cantadas });
     nsJugador.emit('partida:estado-recalculado', {
@@ -1295,6 +1825,7 @@ nsGestor.on('connection', (socket) => {
     if (!frase || !estado.frases.includes(frase)) { socket.emit('gestor:error', { msg: 'Frase no válida.' }); return; }
     if (estado.cantadas.includes(frase)) { socket.emit('gestor:error', { msg: 'Esa frase ya fue cantada.' }); return; }
     estado.cantadas.push(frase);
+    programarGuardadoEstado('critical');
     console.log(`[Servidor] Frase cantada: "${frase}" (${estado.cantadas.length}/${estado.frases.length})`);
     nsJugador.emit('partida:frase-cantada', { frase, cantadas: estado.cantadas });
     nsGestor.emit('partida:frase-cantada',  { frase, cantadas: estado.cantadas });
@@ -1311,6 +1842,7 @@ nsGestor.on('connection', (socket) => {
       estado.verificadas.push(frase);
     }
 
+    programarGuardadoEstado('critical');
     nsGestor.emit('partida:verificaciones-actualizadas', {
       verificadas: estado.verificadas,
       olvidadas: estado.olvidadas
@@ -1331,7 +1863,8 @@ nsGestor.on('connection', (socket) => {
     estado.discordCartonesNotificados = {};
     estado.frases = []; estado.reclamacionesHabilitadas = false; estado.umbralReclamo = 0;
     limpiarColaMarcadasGestor();
-    nsJugador.emit('partida:nueva');
+    programarGuardadoEstado('critical');
+    nsJugador.emit('partida:nueva', { partidaId: 0, partidaActiva: false });
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('estado:actual', construirEstadoGestor());
     console.log('[Servidor] Partida reseteada por el gestor.');
@@ -1495,6 +2028,7 @@ nsGestor.on('connection', (socket) => {
   socket.on('gestor:habilitar-reclamaciones', () => {
     if (!estado.partidaActiva) return;
     estado.reclamacionesHabilitadas = true;
+    programarGuardadoEstado('critical');
     nsJugador.emit('partida:reclamaciones-habilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
     console.log('[Servidor] Reclamaciones habilitadas.');
@@ -1502,6 +2036,7 @@ nsGestor.on('connection', (socket) => {
 
   socket.on('gestor:deshabilitar-reclamaciones', () => {
     estado.reclamacionesHabilitadas = false;
+    programarGuardadoEstado('critical');
     nsJugador.emit('partida:reclamaciones-deshabilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: false });
     console.log('[Servidor] Reclamaciones deshabilitadas.');
@@ -1510,6 +2045,7 @@ nsGestor.on('connection', (socket) => {
   socket.on('gestor:set-umbral', (payload) => {
     const raw = parseInt((payload || {}).umbral, 10);
     estado.umbralReclamo = Number.isFinite(raw) ? Math.max(0, Math.min(25, raw)) : 0;
+    programarGuardadoEstado('critical');
     nsJugador.emit('partida:umbral-actualizado', { umbral: estado.umbralReclamo });
     nsGestor.emit('partida:umbral-actualizado',  { umbral: estado.umbralReclamo });
     console.log(`[Servidor] Umbral de reclamación: ${estado.umbralReclamo}`);
@@ -1518,6 +2054,7 @@ nsGestor.on('connection', (socket) => {
   socket.on('gestor:continuar-bingo', () => {
     if (estado.bingoGanado || !estado.partidaActiva) return;
     estado.reclamacionesHabilitadas = true;
+    programarGuardadoEstado('critical');
     nsJugador.emit('partida:reclamaciones-habilitadas');
     nsGestor.emit('partida:reclamaciones-actualizadas', { habilitadas: true });
     console.log('[Servidor] El gestor continúa la partida para más ganadores.');
@@ -1540,13 +2077,17 @@ nsGestor.on('connection', (socket) => {
     estado.bingoGanado              = true;
     estado.partidaActiva            = false;
     estado.reclamacionesHabilitadas = false;
+    programarGuardadoEstado('critical');
 
-    const jugadores = Object.values(estado.jugadores);
-    const ganadoresLineaDiscord = jugadores.filter(j => j.cantadoLinea).map(j => `${j.nombre} (@${j.twitch})`);
-    const ganadoresBingoDiscord = jugadores.filter(j => j.cantadoBingo).map(j => `${j.nombre} (@${j.twitch})`);
+    const participantes = recopilarParticipantesPartida();
+    const totalOnline = new Set(
+      Object.values(estado.jugadores).map(j => j.twitch || `socket:${j.socketId}`)
+    ).size;
+    const ganadoresLineaDiscord = participantes.filter(j => j.cantadoLinea).map(formatearGanador);
+    const ganadoresBingoDiscord = participantes.filter(j => j.cantadoBingo).map(formatearGanador);
     const ganadoresLinea = ganadoresLineaDiscord.map(g => `  - ${g}`);
     const ganadoresBingo = ganadoresBingoDiscord.map(g => `  - ${g}`);
-    const ganadores = jugadores.filter(j => j.cantadoBingo).map(j => j.nombre);
+    const ganadores = participantes.filter(j => j.cantadoBingo).map(j => j.nombre);
 
     console.log(`[Servidor] Partida terminada. Ganadores de Bingo: ${ganadores.join(', ') || 'ninguno'}`);
     nsJugador.emit('partida:juego-terminado', { ganadores });
@@ -1558,8 +2099,8 @@ nsGestor.on('connection', (socket) => {
       await notificarDiscordFinPartida({
         ganadoresLinea: ganadoresLineaDiscord,
         ganadoresBingo: ganadoresBingoDiscord,
-        totalOnline: jugadores.length,
-        totalJugadores: Object.keys(estado.tokens).length,
+        totalOnline,
+        totalJugadores: participantes.length,
         totalCantadas: estado.cantadas.length,
         umbral: estado.umbralReclamo,
         archivoResultados,
@@ -1602,6 +2143,7 @@ nsGestor.on('connection', (socket) => {
           const dedupeKey = `${estado.partidaIniciadaTs}|${nombreLimpio}|${tipoPremio.toLowerCase()}`;
           if (!estado.discordCartonesNotificados[dedupeKey]) {
             estado.discordCartonesNotificados[dedupeKey] = Date.now();
+            programarGuardadoEstado('critical');
             void notificarDiscordGanadorConCarton({
               nombre: payload.nombre,
               twitch: payload.twitch || '',
@@ -1641,47 +2183,76 @@ nsJugador.on('connection', (socket) => {
   }
 
   const twCookies = parseCookies(socket.handshake.headers.cookie || '');
-  const twUser    = twCookies.twitch_sid ? twitchSessions.get(twCookies.twitch_sid) : null;
+  const twUser    = obtenerSesionTwitch(twCookies.twitch_sid);
+
+  socket.emit('servidor:estado-partida', {
+    partidaActiva: estado.partidaActiva,
+    partidaId: estado.partidaIniciadaTs || 0,
+    bingoGanado: estado.bingoGanado,
+  });
+
+  socket.on('jugador:ping-estado', (_payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const jugador = estado.jugadores[socket.id];
+    const sidActual = parseCookies(socket.handshake.headers.cookie || '')['twitch_sid'];
+    const sesionActual = obtenerSesionTwitch(sidActual);
+    ack({
+      ok: true,
+      registrado: Boolean(jugador),
+      sesionValida: Boolean(sesionActual) || ALLOW_STRESS_BOTS,
+      partidaActiva: estado.partidaActiva,
+      partidaId: estado.partidaIniciadaTs || 0,
+      cantadas: estado.cantadas,
+      lineaGanada: estado.lineaGanada,
+      bingoGanado: estado.bingoGanado,
+      reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
+      umbralReclamo: estado.umbralReclamo,
+      carton: jugador ? jugador.carton : null,
+      marcadas: jugador ? (jugador.marcadas || []) : [],
+    });
+  });
 
   socket.on('jugador:unirse', (payload) => {
     if (estado.jugadores[socket.id]) {
-      socket.emit('partida:error', { msg: 'Ya estás en la partida.' });
+      socket.emit('partida:error', { code: 'YA_UNIDO', msg: 'Ya estás en la partida.' });
       return;
     }
     const { nombre, token } = payload || {};
 
     if (!nombre || typeof nombre !== 'string' || nombre.trim().length === 0) {
-      socket.emit('partida:error', { msg: 'Nombre inválido.' });
+      socket.emit('partida:error', { code: 'NOMBRE_INVALIDO', msg: 'Nombre inválido.' });
       return;
     }
     if (!token || typeof token !== 'string' || token.length < 8 || token.length > 128) {
-      socket.emit('partida:error', { msg: 'Sesión inválida. Recarga la página.' });
+      socket.emit('partida:error', { code: 'TOKEN_INVALIDO', msg: 'Sesión inválida. Recarga la página.' });
       return;
     }
     if (!estado.partidaActiva) {
-      socket.emit('partida:error', { msg: 'No hay ninguna partida activa. Espera al gestor.' });
+      socket.emit('partida:error', { code: 'NO_PARTIDA', msg: 'No hay ninguna partida activa. Espera al gestor.' });
       return;
     }
     if (estado.bingoGanado) {
-      socket.emit('partida:error', { msg: 'La partida ya ha terminado.' });
+      socket.emit('partida:error', { code: 'PARTIDA_TERMINADA', msg: 'La partida ya ha terminado.' });
       return;
     }
-    if (!twUser) {
+    const sidActual = parseCookies(socket.handshake.headers.cookie || '')['twitch_sid'];
+    const twActual = obtenerSesionTwitch(sidActual) || null;
+    if (!twActual) {
       // Allow stress clients only when explicitly enabled via env var.
       if (ALLOW_STRESS_BOTS) {
         if (DEBUG_RECLAMOS) {
           console.log(`[Stress] Bot permitido sin Twitch sid en socket ${socket.id}`);
         }
       } else {
-        socket.emit('partida:error', { msg: 'Debes iniciar sesión con Twitch para jugar.' });
+        socket.emit('partida:error', { code: 'SIN_TWITCH', msg: 'Debes iniciar sesión con Twitch para jugar.' });
         return;
       }
     }
 
     // Keep a stable synthetic login per bot token when stress bypass is enabled.
-    const twitchLogin = twUser ? twUser.login : `stress_${token.slice(0, 16)}`;
+    const twitchLogin = twActual ? twActual.login : `stress_${token.slice(0, 16)}`;
     if (cuentasBaneadas.has(twitchLogin.toLowerCase())) {
-      socket.emit('partida:error', { msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
+      socket.emit('partida:error', { code: 'BANEADO', msg: 'Tu cuenta de Twitch está baneada de Bingoelus.' });
       return;
     }
 
@@ -1698,11 +2269,15 @@ nsJugador.on('connection', (socket) => {
       j => j.nombre.toLowerCase() === nombreClean.toLowerCase() && j.twitch !== twitchLogin
     );
     if (nombreDuplicado) {
-      socket.emit('partida:error', { msg: `El nombre "${nombreClean}" ya está en uso. Elige otro.` });
+      socket.emit('partida:error', { code: 'NOMBRE_DUPLICADO', msg: `El nombre "${nombreClean}" ya está en uso. Elige otro.` });
       return;
     }
 
-    const datosGuardados = estado.tokens[twitchLogin];
+    const datosGuardadosPrevios = estado.tokens[twitchLogin];
+    const datosGuardados = (datosGuardadosPrevios && cartonCoincideConFrases(datosGuardadosPrevios.carton, estado.frases))
+      ? datosGuardadosPrevios
+      : null;
+
     let carton;
     if (datosGuardados) {
       carton = datosGuardados.carton;
@@ -1714,14 +2289,42 @@ nsJugador.on('connection', (socket) => {
         cantadoLinea: false,
         cantadoBingo: false,
         nombre: nombreClean,
-        twitchVerified: !!twUser,
+        twitchVerified: !!twActual,
       };
     }
     estado.tokens[twitchLogin].nombre = nombreClean;
-    estado.tokens[twitchLogin].twitchVerified = !!twUser;
-    const marcadasGuardadas = (datosGuardados && datosGuardados.marcadas)     || [];
-    const cantadoLineaGuard = (datosGuardados && datosGuardados.cantadoLinea) || false;
-    const cantadoBingoGuard = (datosGuardados && datosGuardados.cantadoBingo) || false;
+    estado.tokens[twitchLogin].twitchVerified = !!twActual;
+
+    for (const [oldSid, oldJ] of Object.entries(estado.jugadores)) {
+      if (oldSid === socket.id || oldJ.twitch !== twitchLogin) continue;
+      const pendiente = marcadasPendientesRate.get(oldSid);
+      if (pendiente) {
+        clearTimeout(pendiente.timer);
+        marcadasPendientesRate.delete(oldSid);
+        if (datosGuardados && cartonCoincideConFrases(oldJ.carton, estado.frases)) {
+          aplicarSnapshotMarcadas(oldJ, pendiente.marcadas);
+        }
+      }
+      if (datosGuardados && estado.tokens[twitchLogin] && cartonCoincideConFrases(oldJ.carton, estado.frases)) {
+        estado.tokens[twitchLogin].marcadas = oldJ.marcadas || estado.tokens[twitchLogin].marcadas || [];
+        estado.tokens[twitchLogin].cantadoLinea = Boolean(estado.tokens[twitchLogin].cantadoLinea || oldJ.cantadoLinea);
+        estado.tokens[twitchLogin].cantadoBingo = Boolean(estado.tokens[twitchLogin].cantadoBingo || oldJ.cantadoBingo);
+      }
+      if (oldJ.ip && estado.ips[oldJ.ip] === twitchLogin) delete estado.ips[oldJ.ip];
+      gestorMarcadasPendientes.delete(oldSid);
+      delete estado.jugadores[oldSid];
+      delete rateLimits[oldSid];
+      const oldSock = nsJugador.sockets.get(oldSid);
+      if (oldSock) {
+        oldSock.data = { ...(oldSock.data || {}), reemplazado: true };
+        oldSock.disconnect(true);
+      }
+    }
+
+    programarGuardadoEstado('batch');
+    const marcadasGuardadas = [...((estado.tokens[twitchLogin] && estado.tokens[twitchLogin].marcadas) || [])];
+    const cantadoLineaGuard = Boolean(estado.tokens[twitchLogin] && estado.tokens[twitchLogin].cantadoLinea);
+    const cantadoBingoGuard = Boolean(estado.tokens[twitchLogin] && estado.tokens[twitchLogin].cantadoBingo);
 
     estado.ips[ip] = twitchLogin;
 
@@ -1731,7 +2334,7 @@ nsJugador.on('connection', (socket) => {
       ip,
       nombre:         nombreClean,
       twitch:         twitchLogin,
-      twitchVerified: !!twUser,
+      twitchVerified: !!twActual,
       carton,
       cantadoLinea:   cantadoLineaGuard,
       cantadoBingo:   cantadoBingoGuard,
@@ -1741,6 +2344,7 @@ nsJugador.on('connection', (socket) => {
     console.log(`[Servidor] ${jugador.nombre} (@${twitchLogin}) se unió desde ${ip}.`);
 
     socket.emit('tu:carton', {
+      partidaId:                estado.partidaIniciadaTs || 0,
       carton,
       cantadas:                 estado.cantadas,
       marcadas:                 marcadasGuardadas,
@@ -1749,7 +2353,11 @@ nsJugador.on('connection', (socket) => {
       reclamacionesHabilitadas: estado.reclamacionesHabilitadas,
       umbralReclamo:            estado.umbralReclamo,
     });
-    nsGestor.emit('partida:jugador-unido', resumenJugadores());
+    if (Object.keys(estado.jugadores).length > GESTOR_FULL_THRESHOLD) {
+      scheduledGestorBroadcast();
+    } else {
+      nsGestor.emit('partida:jugador-unido', resumenJugadores());
+    }
   });
 
   socket.on('jugador:actualizar-marcadas', ({ marcadas } = {}) => {
@@ -1841,8 +2449,10 @@ function registrarFalloReclamo(jugador, socket) {
     
     jugador.huelgas = 0; // reset al acertar
     jugador.cantadoLinea = true;
+    marcarGanadorPersistente(jugador.twitch, 'cantadoLinea');
     estado.lineaGanada   = true;
     estado.reclamacionesHabilitadas = false;
+    programarGuardadoEstado('critical');
     console.log(`[Servidor] 🎉 ${jugador.nombre} cantó LÍNEA correctamente.`);
     const payload = { ganador: jugador.nombre, twitch: jugador.twitch, socketId: socket.id };
     socket.emit('tu:linea-valida', payload);
@@ -1887,7 +2497,9 @@ function registrarFalloReclamo(jugador, socket) {
     
     jugador.huelgas = 0; // reset al acertar
     jugador.cantadoBingo = true;
+    marcarGanadorPersistente(jugador.twitch, 'cantadoBingo');
     estado.reclamacionesHabilitadas = false;
+    programarGuardadoEstado('critical');
     console.log(`[Servidor] 🏆 ${jugador.nombre} cantó BINGO correctamente.`);
     const payload = { ganador: jugador.nombre, twitch: jugador.twitch, socketId: socket.id };
     socket.emit('tu:bingo-valido', payload);
@@ -1915,14 +2527,25 @@ function registrarFalloReclamo(jugador, socket) {
       if (marcasPendientes) {
         clearTimeout(marcasPendientes.timer);
         marcadasPendientesRate.delete(socket.id);
-        aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+        if (!socket.data?.reemplazado && cartonCoincideConFrases(jugador.carton, estado.frases)) {
+          aplicarSnapshotMarcadas(jugador, marcasPendientes.marcadas);
+        }
       }
-      if (estado.tokens[jugador.twitch]) {
-        estado.tokens[jugador.twitch].marcadas     = jugador.marcadas;
-        estado.tokens[jugador.twitch].cantadoLinea = jugador.cantadoLinea;
-        estado.tokens[jugador.twitch].cantadoBingo = jugador.cantadoBingo;
+      const hayOtroSocketActivo = Object.entries(estado.jugadores).some(
+        ([sid, otro]) => sid !== socket.id && otro.twitch === jugador.twitch
+      );
+      if (!socket.data?.reemplazado && !hayOtroSocketActivo && estado.tokens[jugador.twitch]) {
+        if (cartonCoincideConFrases(jugador.carton, estado.frases) &&
+            cartonCoincideConFrases(estado.tokens[jugador.twitch].carton, estado.frases)) {
+          estado.tokens[jugador.twitch].marcadas = jugador.marcadas;
+        }
+        estado.tokens[jugador.twitch].cantadoLinea = Boolean(estado.tokens[jugador.twitch].cantadoLinea || jugador.cantadoLinea);
+        estado.tokens[jugador.twitch].cantadoBingo = Boolean(estado.tokens[jugador.twitch].cantadoBingo || jugador.cantadoBingo);
+        programarGuardadoEstado('batch');
       }
-      if (jugador.ip && estado.ips[jugador.ip] === jugador.twitch) delete estado.ips[jugador.ip];
+      if (!hayOtroSocketActivo && jugador.ip && estado.ips[jugador.ip] === jugador.twitch) {
+        delete estado.ips[jugador.ip];
+      }
       gestorMarcadasPendientes.delete(socket.id);
       delete estado.jugadores[socket.id];
       delete rateLimits[socket.id];
@@ -1943,3 +2566,43 @@ httpServer.listen(PORT, () => {
   if (cfg.baseUrl) console.log(`[Servidor] URL pública configurada: ${cfg.baseUrl}`);
   else console.log('[Servidor] Sin baseUrl configurada (Twitch OAuth no funcionará). Añade baseUrl en config.json.');
 });
+
+let apagadoEnCurso = false;
+async function apagarServidor(signal) {
+  if (apagadoEnCurso) return;
+  apagadoEnCurso = true;
+  console.log(`[Servidor] Recibida señal ${signal}. Guardando estado antes de salir...`);
+
+  if (gestorBroadcastTimer) {
+    clearTimeout(gestorBroadcastTimer);
+    gestorBroadcastTimer = null;
+  }
+  if (gestorMarcadasTimer) {
+    clearTimeout(gestorMarcadasTimer);
+    gestorMarcadasTimer = null;
+  }
+
+  for (const [socketId, pendiente] of marcadasPendientesRate.entries()) {
+    clearTimeout(pendiente.timer);
+    const jugador = estado.jugadores[socketId];
+    if (jugador) aplicarSnapshotMarcadas(jugador, pendiente.marcadas);
+  }
+  marcadasPendientesRate.clear();
+
+  if (persistWriteInFlight) {
+    try {
+      await persistWriteInFlight;
+    } catch {
+      // guardarEstadoPartidaSync() reintentará escribir el estado actual.
+    }
+  }
+  guardarEstadoPartidaSync();
+
+  setTimeout(() => process.exit(0), 1500).unref();
+  io.close(() => {
+    httpServer.close(() => process.exit(0));
+  });
+}
+
+process.once('SIGTERM', () => { void apagarServidor('SIGTERM'); });
+process.once('SIGINT', () => { void apagarServidor('SIGINT'); });

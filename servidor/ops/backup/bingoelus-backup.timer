@@ -1,10 +1,10 @@
 [Unit]
-Description=Run Bingoelus backup every 2 minutes
+Description=Run Bingoelus backup every 1 minute
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=2min
-AccuracySec=15s
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
 Unit=bingoelus-backup.service
 
 [Install]

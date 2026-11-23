@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <link rel="icon" type="image/png" href="/media/bingoelus.png" />
   <title>Bingoelus — Gestor</title>
   <style>
@@ -10,6 +11,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      color-scheme: dark;
       --bg:        #090909;
       --surface:   #151515;
       --surface2:  #202020;
@@ -1475,6 +1477,52 @@
     #log-eventos .warn { color: #dfbd64; }
     #log-eventos .error { color: #d47d68; }
     :focus-visible { outline-color: #ffe08a; }
+    #banner-conexion {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 10px 20px;
+      background: linear-gradient(90deg, rgba(127, 29, 29, .92), rgba(69, 10, 10, .95));
+      border-bottom: 1px solid rgba(215, 125, 104, .55);
+      color: #fde8e2;
+      font-size: .86rem;
+      font-weight: 600;
+      z-index: 90;
+    }
+    #banner-conexion.visible { display: flex; }
+    .banner-conexion-info { display: flex; align-items: center; gap: 10px; }
+    .banner-conexion-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, .7);
+      animation: pulso-conexion 1.2s ease-in-out infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes pulso-conexion {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .45; transform: scale(.85); }
+    }
+    .banner-conexion-acciones { display: flex; align-items: center; gap: 8px; }
+    .banner-conexion-acciones button {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 215, 101, .45);
+      background: rgba(255, 215, 101, .14);
+      color: #ffe08a;
+      font-size: .78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .banner-conexion-acciones button:hover { background: rgba(255, 215, 101, .24); }
+    .banner-conexion-acciones button.secundario {
+      border-color: rgba(255, 255, 255, .25);
+      background: rgba(0, 0, 0, .28);
+      color: #f3e9dc;
+    }
   </style>
 </head>
 <body>
@@ -1564,6 +1612,17 @@
     </div>
   </div>
 </header>
+
+<div id="banner-conexion" role="status" aria-live="polite">
+  <div class="banner-conexion-info">
+    <span class="banner-conexion-dot" aria-hidden="true"></span>
+    <span id="banner-conexion-msg">Conexión perdida con el servidor. Reintentando automáticamente…</span>
+  </div>
+  <div class="banner-conexion-acciones">
+    <button type="button" onclick="reconectarAhora()">Reconectar ahora</button>
+    <button type="button" class="secundario" onclick="abrirOverlayConexion()">Cambiar conexión</button>
+  </div>
+</div>
 
 <!-- ═══════════════ MAIN ═══════════════ -->
 <main>
@@ -1693,6 +1752,8 @@
 
   // ── Conexión diferida — el gestor introduce URL y token ──────
   let socket = null;
+  let conectadoAlgunaVez = false;
+  let credencialesConexion = null;
 
   // Pre-rellenar con la última URL usada
   (function() {
@@ -1703,6 +1764,52 @@
     }
   })();
 
+  function mostrarBannerConexion(msg) {
+    const banner = document.getElementById('banner-conexion');
+    const msgEl = document.getElementById('banner-conexion-msg');
+    if (msgEl && msg) msgEl.textContent = msg;
+    if (banner) banner.classList.add('visible');
+  }
+
+  function ocultarBannerConexion() {
+    const banner = document.getElementById('banner-conexion');
+    if (banner) banner.classList.remove('visible');
+  }
+
+  function esErrorAutenticacion(err) {
+    return String((err && err.message) || '').toLowerCase().includes('forbidden');
+  }
+
+  function limpiarSocketActual() {
+    if (!socket) return;
+    socket.removeAllListeners();
+    if (socket.io) socket.io.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+
+  function abrirOverlayConexion(mensaje = '') {
+    limpiarSocketActual();
+    ocultarBannerConexion();
+    const overlay = document.getElementById('overlay-conexion');
+    const errEl = document.getElementById('connect-error');
+    if (overlay) overlay.style.display = 'flex';
+    if (errEl) errEl.textContent = mensaje;
+  }
+  window.abrirOverlayConexion = abrirOverlayConexion;
+
+  function emitirAlServidor(evento, payload) {
+    if (!socket || !socket.connected) {
+      if (typeof agregarLog === 'function') {
+        agregarLog('Sin conexión con el servidor. Espera a que reconecte.', 'error');
+      }
+      return false;
+    }
+    if (payload === undefined) socket.emit(evento);
+    else socket.emit(evento, payload);
+    return true;
+  }
+
   function conectar() {
     const url   = (document.getElementById('input-srv-url').value   || '').trim().replace(/\/$/, '');
     const token = (document.getElementById('input-gestor-token').value || '').trim();
@@ -1710,10 +1817,41 @@
     if (!url || !token) { errEl.textContent = 'Completa los dos campos.'; return; }
     errEl.textContent = 'Conectando…';
     localStorage.setItem('bingoelus_srv_url', url);
-    socket = io(`${url}/gestor`, { transports: ['websocket', 'polling'], auth: { token } });
+    credencialesConexion = { url, token };
+    limpiarSocketActual();
+    socket = io(`${url}/gestor`, {
+      transports: ['websocket', 'polling'],
+      auth: { token },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.3,
+      timeout: 10000,
+    });
     registrarEventos();
   }
   window.conectar = conectar;
+
+  function reconectarAhora() {
+    if (socket) {
+      mostrarBannerConexion('Reintentando conexión con el servidor…');
+      if (!socket.connected) socket.connect();
+      return;
+    }
+    if (credencialesConexion) {
+      document.getElementById('input-srv-url').value = credencialesConexion.url;
+      document.getElementById('input-gestor-token').value = credencialesConexion.token;
+      conectar();
+      return;
+    }
+    abrirOverlayConexion();
+  }
+  window.reconectarAhora = reconectarAhora;
+
+  window.addEventListener('online', () => {
+    if (socket && !socket.connected) socket.connect();
+  });
 
   // ── Estado local (mirror del servidor para renderizar) ─
   let estadoLocal = {
@@ -1764,13 +1902,14 @@
   let refrescoRankingTimer = null;
   let busquedaReqSeq = 0;
   let busquedaReqPendiente = 0;
+  let ultimoConteoOnlineLog = null;
 
   function programarRefrescoRanking() {
     if (refrescoRankingTimer) return;
     refrescoRankingTimer = setTimeout(() => {
       refrescoRankingTimer = null;
       renderizarCartones(obtenerJugadoresParaRender(), estadoLocal.cantadas);
-    }, 450);
+    }, 600);
   }
 
   function obtenerJugadoresParaRender() {
@@ -1792,10 +1931,10 @@
     }
 
     const emitir = () => {
-      if (!socket) return;
+      if (!socket || !socket.connected) return;
       const requestId = ++busquedaReqSeq;
       busquedaReqPendiente = requestId;
-      socket.emit('gestor:buscar-jugadores', { q, limit: 50, requestId });
+      emitirAlServidor('gestor:buscar-jugadores', { q, limit: 50, requestId });
     };
 
     if (inmediata) emitir();
@@ -2051,7 +2190,7 @@
     link.click();
 
     // Envía la imagen al servidor para que la guarde en la VM GCP
-    socket.emit('gestor:guardar-carton', {
+    emitirAlServidor('gestor:guardar-carton', {
       nombre: jugador.nombre,
       twitch: jugador.twitch || '',
       tipoPremio: tipoPremio,
@@ -2083,15 +2222,17 @@
 
   function continuarBingo() {
     cerrarOverlay();
-    socket.emit('gestor:continuar-bingo');
-    agregarLog('El gestor permite más ganadores de Bingo.', 'ok');
+    if (emitirAlServidor('gestor:continuar-bingo')) {
+      agregarLog('El gestor permite más ganadores de Bingo.', 'ok');
+    }
   }
   window.continuarBingo = continuarBingo;
 
   function terminarPartida() {
     cerrarOverlay();
-    socket.emit('gestor:terminar-partida');
-    agregarLog('El gestor ha terminado la partida.', 'ok');
+    if (emitirAlServidor('gestor:terminar-partida')) {
+      agregarLog('El gestor ha terminado la partida.', 'ok');
+    }
   }
   window.terminarPartida = terminarPartida;
 
@@ -2154,7 +2295,7 @@
 
       if (!btn.disabled) {
         btn.addEventListener('click', () => {
-          socket.emit('gestor:cantar-frase', { frase });
+          emitirAlServidor('gestor:cantar-frase', { frase });
         });
       }
 
@@ -2168,7 +2309,7 @@
         btnD.addEventListener('mouseover', () => { btnD.style.background = 'rgba(184,92,76,.15)'; });
         btnD.addEventListener('mouseout',  () => { btnD.style.background = 'transparent'; });
         btnD.addEventListener('click', () => {
-          socket.emit('gestor:desmarcar-frase', { frase });
+          emitirAlServidor('gestor:desmarcar-frase', { frase });
         });
         wrapper.appendChild(btnD);
       }
@@ -2178,6 +2319,223 @@
   }
 
   // ── Renderizar lista de jugadores (acordeón) ──────────
+  function crearFirmaMetaJugador(j) {
+    return JSON.stringify([
+      j.nombre || '',
+      j.twitch || '',
+      !!j.twitchVerified,
+      !!j.cantadoLinea,
+      !!j.cantadoBingo,
+      j.online !== false,
+    ]);
+  }
+
+  function crearFirmaCartonJugador(j, cantadasSet) {
+    const marcadasSet = new Set(j.marcadas || []);
+    const filas = Array.isArray(j.carton) ? j.carton : [];
+    const estadoCeldas = [];
+    for (let fi = 0; fi < filas.length; fi++) {
+      const row = Array.isArray(filas[fi]) ? filas[fi] : [];
+      for (let ci = 0; ci < row.length; ci++) {
+        const frase = row[ci];
+        estadoCeldas.push([frase, cantadasSet.has(frase) ? 1 : 0, marcadasSet.has(frase) ? 1 : 0]);
+      }
+    }
+    return JSON.stringify(estadoCeldas);
+  }
+
+  function crearFirmaAccionesJugador(j) {
+    return JSON.stringify([
+      j.socketId || '',
+      j.nombre || '',
+      !!j.cantadoLinea,
+      !!j.cantadoBingo,
+      !!estadoLocal.partidaActiva,
+    ]);
+  }
+
+  function crearFilaJugador(j) {
+    const fila = document.createElement('div');
+    fila.className = 'jugador-fila';
+    fila.dataset.id = j.socketId;
+    fila._jugador = j;
+
+    const cabecera = document.createElement('div');
+    cabecera.className = 'jugador-cabecera';
+
+    const nombreEl = document.createElement('div');
+    nombreEl.className = 'jugador-nombre';
+
+    const avatar = document.createElement('span');
+    avatar.className = 'jugador-avatar';
+
+    const textoNombre = document.createElement('span');
+
+    const chevron = document.createElement('span');
+    chevron.className = 'jugador-chevron';
+    chevron.textContent = '▼';
+
+    cabecera.appendChild(nombreEl);
+    cabecera.appendChild(chevron);
+
+    cabecera.addEventListener('click', () => {
+      const estaAbierto = fila.classList.contains('abierto');
+      listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
+      if (estaAbierto) {
+        jugadorAbierto = null;
+      } else {
+        fila.classList.add('abierto');
+        jugadorAbierto = fila._jugador ? fila._jugador.socketId : fila.dataset.id;
+      }
+    });
+
+    const panelCarton = document.createElement('div');
+    panelCarton.className = 'jugador-carton';
+
+    const inner = document.createElement('div');
+    inner.className = 'jugador-carton-inner';
+
+    const grid = document.createElement('div');
+    grid.className = 'carton-grid';
+
+    const acciones = document.createElement('div');
+    acciones.className = 'jugador-acciones';
+
+    inner.appendChild(grid);
+    panelCarton.appendChild(inner);
+    fila.appendChild(cabecera);
+    fila.appendChild(panelCarton);
+
+    fila._refs = { nombreEl, avatar, textoNombre, inner, grid, acciones };
+    fila._metaSig = '';
+    fila._cartonSig = '';
+    fila._cartonPhrasesSig = '';
+    fila._accionesSig = '';
+    return fila;
+  }
+
+  function actualizarFilaJugador(fila, j, cantadasSet, estaAbierto) {
+    fila._jugador = j;
+    fila.dataset.id = j.socketId;
+
+    const claseEsperada = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '') + (estaAbierto ? ' abierto' : '');
+    if (fila.className !== claseEsperada) fila.className = claseEsperada;
+
+    const refs = fila._refs;
+    const metaSig = crearFirmaMetaJugador(j);
+    if (fila._metaSig !== metaSig) {
+      fila._metaSig = metaSig;
+      refs.avatar.textContent = (j.nombre || '?').charAt(0).toUpperCase();
+      refs.textoNombre.textContent = j.nombre || '';
+
+      const nodosHeader = [refs.avatar, refs.textoNombre];
+      if (j.twitch) {
+        const twitchEl = document.createElement('span');
+        twitchEl.className = 'twitch-tag';
+        twitchEl.textContent = `@${j.twitch}`;
+        if (j.twitchVerified) {
+          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
+          twitchEl.textContent += ' ✓';
+          twitchEl.classList.add('twitch-verified');
+        }
+        nodosHeader.push(twitchEl);
+      }
+      if (j.cantadoLinea) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-linea';
+        b.textContent = 'LÍNEA';
+        nodosHeader.push(b);
+      }
+      if (j.cantadoBingo) {
+        const b = document.createElement('span');
+        b.className = 'badge badge-bingo';
+        b.textContent = 'BINGO';
+        nodosHeader.push(b);
+      }
+      if (j.online === false) {
+        const b = document.createElement('span');
+        b.className = 'badge-offline';
+        b.textContent = 'desconectado';
+        nodosHeader.push(b);
+      }
+      refs.nombreEl.replaceChildren(...nodosHeader);
+    }
+
+    const cartonSig = crearFirmaCartonJugador(j, cantadasSet);
+    if (fila._cartonSig !== cartonSig) {
+      fila._cartonSig = cartonSig;
+      const frasesPlanas = Array.isArray(j.carton) ? j.carton.flat() : [];
+      const phrasesSig = JSON.stringify(frasesPlanas);
+      const marcadasSet = new Set(j.marcadas || []);
+
+      if (fila._cartonPhrasesSig !== phrasesSig || refs.grid.children.length !== frasesPlanas.length) {
+        fila._cartonPhrasesSig = phrasesSig;
+        const nuevasCeldas = frasesPlanas.map(frase => {
+          const celda = document.createElement('div');
+          const span = document.createElement('span');
+          span.textContent = frase;
+          celda.appendChild(span);
+          return celda;
+        });
+        refs.grid.replaceChildren(...nuevasCeldas);
+      }
+
+      const celdas = refs.grid.children;
+      for (let i = 0; i < frasesPlanas.length; i++) {
+        const frase = frasesPlanas[i];
+        const celda = celdas[i];
+        const esCantada = cantadasSet.has(frase);
+        const esMarcada = marcadasSet.has(frase);
+        const claseCelda = 'celda' + (esCantada ? ' cantada' : '') + (esMarcada ? ' marcada-jugador' : '');
+        if (celda.className !== claseCelda) celda.className = claseCelda;
+        celda.title = esMarcada
+          ? esCantada ? `Marcada por el jugador y cantada: ${frase}` : `Marcada por el jugador, pero aún no cantada: ${frase}`
+          : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : frase;
+      }
+    }
+
+    const accionesSig = crearFirmaAccionesJugador(j);
+    if (fila._accionesSig !== accionesSig) {
+      fila._accionesSig = accionesSig;
+      if (estadoLocal.partidaActiva && (!j.cantadoLinea || !j.cantadoBingo)) {
+        const botones = [];
+        if (!j.cantadoLinea) {
+          const btnLinea = document.createElement('button');
+          btnLinea.type = 'button';
+          btnLinea.className = 'btn-declarar-ganador linea';
+          btnLinea.textContent = 'Declarar línea';
+          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
+          btnLinea.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const actual = fila._jugador || j;
+            if (!confirm(`¿Declarar LÍNEA para ${actual.nombre}?`)) return;
+            emitirAlServidor('gestor:declarar-linea', { socketId: actual.socketId });
+          });
+          botones.push(btnLinea);
+        }
+        if (!j.cantadoBingo) {
+          const btnBingo = document.createElement('button');
+          btnBingo.type = 'button';
+          btnBingo.className = 'btn-declarar-ganador bingo';
+          btnBingo.textContent = 'Declarar bingo';
+          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
+          btnBingo.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const actual = fila._jugador || j;
+            if (!confirm(`¿Declarar BINGO para ${actual.nombre}?`)) return;
+            emitirAlServidor('gestor:declarar-bingo', { socketId: actual.socketId });
+          });
+          botones.push(btnBingo);
+        }
+        refs.acciones.replaceChildren(...botones);
+        if (refs.acciones.parentNode !== refs.inner) refs.inner.appendChild(refs.acciones);
+      } else {
+        refs.acciones.replaceChildren();
+        if (refs.acciones.parentNode === refs.inner) refs.inner.removeChild(refs.acciones);
+      }
+    }
+  }
+
   function renderizarCartones(jugadores, cantadas) {
     const termBusqueda = (document.getElementById('buscador-jugadores')?.value || '').trim();
     const cantadasSet = new Set(cantadas);
@@ -2199,11 +2557,9 @@
       return;
     }
 
-    // Guardar el ID abierto antes de reconstruir
     const anteriorAbierto = jugadorAbierto;
-    listaJugadores.innerHTML = '';
 
-    // Ordenar jugadores por casillas faltantes para el bingo (menos faltantes primero)
+    // Ordenar jugadores por casillas faltantes para el bingo y desempate determinista
     const jugadoresOrdenados = [...jugadores].sort((a, b) => {
       const marcadasA = new Set(a.marcadas || []);
       const marcadasB = new Set(b.marcadas || []);
@@ -2215,155 +2571,47 @@
       const faltantesB = cartonB.length > 0
         ? cartonB.filter(f => !(cantadasSet.has(f) && marcadasB.has(f))).length
         : Number.MAX_SAFE_INTEGER;
-      return faltantesA - faltantesB;
+      if (faltantesA !== faltantesB) return faltantesA - faltantesB;
+      const cmpNombre = (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' });
+      if (cmpNombre !== 0) return cmpNombre;
+      return String(a.socketId || '').localeCompare(String(b.socketId || ''));
     });
 
+    const filasPorId = new Map();
+    Array.from(listaJugadores.children).forEach(nodo => {
+      if (nodo.classList && nodo.classList.contains('jugador-fila') && nodo.dataset && nodo.dataset.id) {
+        filasPorId.set(nodo.dataset.id, nodo);
+      } else if (typeof nodo.remove === 'function') {
+        nodo.remove();
+      } else if (nodo.parentNode) {
+        nodo.parentNode.removeChild(nodo);
+      }
+    });
+
+    const idsActivos = new Set();
+    const filasOrdenadas = [];
     jugadoresOrdenados.forEach(j => {
-      const fila = document.createElement('div');
-      fila.className  = 'jugador-fila' + (j.online === false ? ' jugador-offline' : '');
-      fila.dataset.id = j.socketId;
-      if (j.socketId === anteriorAbierto) fila.classList.add('abierto');
-
-      // ── Cabecera clicable ──────────────────────────────
-      const cabecera = document.createElement('div');
-      cabecera.className = 'jugador-cabecera';
-
-      const nombreEl = document.createElement('div');
-      nombreEl.className = 'jugador-nombre';
-
-      // Avatar inicial
-      const avatar = document.createElement('span');
-      avatar.className = 'jugador-avatar';
-      avatar.textContent = j.nombre.charAt(0).toUpperCase();
-      nombreEl.appendChild(avatar);
-
-      const textoNombre = document.createElement('span');
-      textoNombre.textContent = j.nombre;
-      nombreEl.appendChild(textoNombre);
-
-      // Twitch username (optional)
-      if (j.twitch) {
-        const twitchEl = document.createElement('span');
-        twitchEl.className   = 'twitch-tag';
-        twitchEl.textContent = `@${j.twitch}`;
-        if (j.twitchVerified) {
-          twitchEl.title = 'Autenticado con Twitch OAuth ✓';
-          twitchEl.textContent += ' ✓';
-          twitchEl.classList.add('twitch-verified');
-        }
-        nombreEl.appendChild(twitchEl);
+      idsActivos.add(j.socketId);
+      let fila = filasPorId.get(j.socketId);
+      if (!fila) {
+        fila = crearFilaJugador(j);
       }
+      actualizarFilaJugador(fila, j, cantadasSet, j.socketId === anteriorAbierto);
+      filasOrdenadas.push(fila);
+    });
 
-      if (j.cantadoLinea) {
-        const b = document.createElement('span');
-        b.className = 'badge badge-linea';
-        b.textContent = 'LÍNEA';
-        nombreEl.appendChild(b);
+    filasPorId.forEach((fila, sid) => {
+      if (!idsActivos.has(sid)) {
+        if (typeof fila.remove === 'function') fila.remove();
+        else if (fila.parentNode) fila.parentNode.removeChild(fila);
       }
-      if (j.cantadoBingo) {
-        const b = document.createElement('span');
-        b.className = 'badge badge-bingo';
-        b.textContent = 'BINGO';
-        nombreEl.appendChild(b);
+    });
+
+    filasOrdenadas.forEach((fila, idx) => {
+      const actualEnPos = listaJugadores.children[idx];
+      if (actualEnPos !== fila) {
+        listaJugadores.insertBefore(fila, actualEnPos || null);
       }
-      if (j.online === false) {
-        const b = document.createElement('span');
-        b.className = 'badge-offline';
-        b.textContent = 'desconectado';
-        nombreEl.appendChild(b);
-      }
-
-      const chevron = document.createElement('span');
-      chevron.className   = 'jugador-chevron';
-      chevron.textContent = '▼';
-
-      cabecera.appendChild(nombreEl);
-      cabecera.appendChild(chevron);
-
-      // Toggle acordeón al hacer clic en la cabecera
-      cabecera.addEventListener('click', () => {
-        const estaAbierto = fila.classList.contains('abierto');
-        // Cerrar todos
-        listaJugadores.querySelectorAll('.jugador-fila.abierto').forEach(f => f.classList.remove('abierto'));
-        if (estaAbierto) {
-          jugadorAbierto = null; // Era el mismo → cerrar
-        } else {
-          fila.classList.add('abierto');
-          jugadorAbierto = j.socketId;
-        }
-      });
-
-      // ── Panel del cartón (collapsable) ────────────────
-      const panelCarton = document.createElement('div');
-      panelCarton.className = 'jugador-carton';
-
-      const inner = document.createElement('div');
-      inner.className = 'jugador-carton-inner';
-
-      const grid = document.createElement('div');
-      grid.className = 'carton-grid';
-      const marcadasSet = new Set(j.marcadas || []);
-      j.carton.forEach(fila2 => {
-        fila2.forEach(frase => {
-          const celda = document.createElement('div');
-          const esCantada  = cantadasSet.has(frase);
-          const esMarcada  = marcadasSet.has(frase);
-          let clasesCelda  = 'celda';
-          if (esCantada)  clasesCelda += ' cantada';
-          if (esMarcada)  clasesCelda += ' marcada-jugador';
-          celda.className   = clasesCelda;
-          const span = document.createElement('span');
-          span.textContent = frase;
-          celda.appendChild(span);
-          celda.title = esMarcada
-            ? esCantada ? `Marcada por el jugador y cantada: ${frase}` : `Marcada por el jugador, pero aún no cantada: ${frase}`
-            : esCantada ? `Cantada, aún no marcada por el jugador: ${frase}` : frase;
-          grid.appendChild(celda);
-        });
-      });
-
-      inner.appendChild(grid);
-
-      if (estadoLocal.partidaActiva) {
-        const acciones = document.createElement('div');
-        acciones.className = 'jugador-acciones';
-
-        if (!j.cantadoLinea) {
-          const btnLinea = document.createElement('button');
-          btnLinea.type = 'button';
-          btnLinea.className = 'btn-declarar-ganador linea';
-          btnLinea.textContent = 'Declarar línea';
-          btnLinea.title = 'Asignar línea manualmente (sin que el jugador la cante)';
-          btnLinea.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar LÍNEA para ${j.nombre}?`)) return;
-            socket.emit('gestor:declarar-linea', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnLinea);
-        }
-
-        if (!j.cantadoBingo) {
-          const btnBingo = document.createElement('button');
-          btnBingo.type = 'button';
-          btnBingo.className = 'btn-declarar-ganador bingo';
-          btnBingo.textContent = 'Declarar bingo';
-          btnBingo.title = 'Asignar bingo manualmente (sin que el jugador lo cante)';
-          btnBingo.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            if (!confirm(`¿Declarar BINGO para ${j.nombre}?`)) return;
-            socket.emit('gestor:declarar-bingo', { socketId: j.socketId });
-          });
-          acciones.appendChild(btnBingo);
-        }
-
-        if (acciones.childElementCount > 0) inner.appendChild(acciones);
-      }
-
-      panelCarton.appendChild(inner);
-
-      fila.appendChild(cabecera);
-      fila.appendChild(panelCarton);
-      listaJugadores.appendChild(fila);
     });
 
     aplicarFiltroJugadores(true); // Reaplicar el buscador local (sin relanzar búsqueda remota)
@@ -2477,7 +2725,12 @@
 
   function registrarEventos() {
     socket.on('connect', () => {
+      const eraReconexion = conectadoAlgunaVez;
+      conectadoAlgunaVez = true;
       document.getElementById('overlay-conexion').style.display = 'none';
+      const errEl = document.getElementById('connect-error');
+      if (errEl) errEl.textContent = '';
+      ocultarBannerConexion();
       const url = localStorage.getItem('bingoelus_srv_url') || '';
       document.getElementById('txt-url').textContent = url;
 
@@ -2487,24 +2740,55 @@
         estadoLocal.jugadoresBusqueda = [];
       }
 
-      agregarLog('Conectado al servidor.', 'ok');
+      agregarLog(eraReconexion ? 'Reconectado al servidor.' : 'Conectado al servidor.', 'ok');
     });
     socket.on('connect_error', (err) => {
-      const errEl = document.getElementById('connect-error');
-      const message = err.message || 'no se pudo conectar.';
-      if (errEl) {
-        errEl.textContent = message.toLowerCase() === 'websocket error'
-          ? 'Servidor no conectado'
-          : 'Error: ' + message;
+      if (esErrorAutenticacion(err)) {
+        limpiarSocketActual();
+        ocultarBannerConexion();
+        const overlay = document.getElementById('overlay-conexion');
+        if (overlay) overlay.style.display = 'flex';
+        const errEl = document.getElementById('connect-error');
+        if (errEl) errEl.textContent = 'Token incorrecto (acceso denegado).';
+        agregarLog('Error de autenticación con el servidor (token inválido).', 'error');
+        return;
       }
-      if (socket) { socket.disconnect(); socket = null; }
+
+      const message = (err && err.message) ? err.message : 'no se pudo conectar.';
+      const texto = message.toLowerCase() === 'websocket error'
+        ? 'Servidor no disponible. Reintentando automáticamente…'
+        : `Error de conexión (${message}). Reintentando automáticamente…`;
+      if (conectadoAlgunaVez) {
+        mostrarBannerConexion(texto);
+      } else {
+        const errEl = document.getElementById('connect-error');
+        if (errEl) errEl.textContent = texto;
+      }
     });
-    socket.on('disconnect', () => {
-      agregarLog('Desconectado del servidor.', 'error');
+    socket.on('disconnect', (reason) => {
+      mostrarBannerConexion('Conexión perdida con el servidor. Reintentando automáticamente…');
+      agregarLog(`Desconectado del servidor (${reason || 'sin motivo'}). Reintentando…`, 'error');
+      if (reason === 'io server disconnect' && socket) {
+        setTimeout(() => {
+          if (socket && !socket.connected) socket.connect();
+        }, 1000);
+      }
     });
+    if (socket.io) {
+      socket.io.on('reconnect_attempt', (intento) => {
+        const msg = `Reconectando con el servidor… (intento ${intento})`;
+        if (conectadoAlgunaVez) {
+          mostrarBannerConexion(msg);
+        } else {
+          const errEl = document.getElementById('connect-error');
+          if (errEl) errEl.textContent = msg;
+        }
+      });
+    }
 
     // Estado completo (al conectar o tras reset)
     socket.on('estado:actual', (data) => {
+      ultimoConteoOnlineLog = null;
       aplicarEstado(data);
 
       // Si el buscador está activo en modo compacto, reconsultar para mantener resultados coherentes.
@@ -2552,7 +2836,10 @@
       else renderizarCartones(estadoLocal.jugadores, estadoLocal.cantadas);
     }
     const n = Number.isFinite(estadoLocal.online) ? estadoLocal.online : estadoLocal.jugadores.length;
-    agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+    if (n !== ultimoConteoOnlineLog) {
+      ultimoConteoOnlineLog = n;
+      agregarLog(`${n} jugador(es) conectado(s).`, 'info');
+    }
   });
 
   socket.on('partida:resultado-busqueda-jugadores', ({ q, jugadores, requestId }) => {
@@ -2581,6 +2868,7 @@
     if (jugBusqueda) jugBusqueda.marcadas = marcadas;
     const fila = listaJugadores.querySelector(`[data-id="${socketId}"]`);
     if (fila) {
+      fila._cartonSig = '';
       const marcadasSet = new Set(marcadas);
       const cantadasSet = new Set(estadoLocal.cantadas);
       fila.querySelectorAll('.celda').forEach(celda => {
@@ -2666,7 +2954,7 @@
       return;
     }
 
-    socket.emit('gestor:iniciar-partida', { frases });
+    if (!emitirAlServidor('gestor:iniciar-partida', { frases })) return;
     estadoLocal.partidaActiva = true;
     actualizarUIEstadoPartida(true);
     agregarLog(`Partida iniciada con ${frases.length} frases.`, 'ok');
@@ -2674,7 +2962,7 @@
 
   btnResetear.addEventListener('click', () => {
     if (confirm('¿Seguro que quieres resetear la partida? Se borrarán todos los datos.')) {
-      socket.emit('gestor:resetear');
+      if (!emitirAlServidor('gestor:resetear')) return;
       inputFrases.value = '';
       estadoLocal.partidaActiva = false;
       actualizarUIEstadoPartida(false);
@@ -2684,16 +2972,17 @@
 
   document.getElementById('btn-reclamaciones').addEventListener('click', () => {
     if (reclamacionesActivas) {
-      socket.emit('gestor:deshabilitar-reclamaciones');
+      emitirAlServidor('gestor:deshabilitar-reclamaciones');
     } else {
-      socket.emit('gestor:habilitar-reclamaciones');
+      emitirAlServidor('gestor:habilitar-reclamaciones');
     }
   });
 
   document.getElementById('btn-umbral').addEventListener('click', () => {
     const umbral = Math.max(0, Math.min(25, parseInt(document.getElementById('input-umbral').value, 10) || 0));
-    socket.emit('gestor:set-umbral', { umbral });
-    agregarLog(`Umbral aplicado: ${umbral} casilla(s) mínima(s) para reclamar.`, 'info');
+    if (emitirAlServidor('gestor:set-umbral', { umbral })) {
+      agregarLog(`Umbral aplicado: ${umbral} casilla(s) mínima(s) para reclamar.`, 'info');
+    }
   });
 
   btnCopiar.addEventListener('click', () => {
